@@ -214,46 +214,53 @@ window.updateTab = updateTab;
 
 function getParams() {
     const shape = shapeSelect.value;
+    
+    // Helper to safely get number values
+    const getNum = (id) => {
+        const el = document.getElementById(id);
+        return el ? (parseFloat(el.value) || 0) : 0;
+    };
+
     const params = {
         shape: shape,
         origin: originSelect.value,
-        toolDiameter: parseFloat(document.getElementById('toolDiameter').value) || 0,
+        toolDiameter: getNum('toolDiameter'),
         operation: document.getElementById('operation').value,
-        targetDepth: parseFloat(document.getElementById('targetDepth').value) || 0,
-        passDepth: parseFloat(document.getElementById('passDepth').value) || 0,
-        safeZ: parseFloat(document.getElementById('safeZ').value) || 0,
-        spindleSpeed: parseFloat(document.getElementById('spindleSpeed').value) || 0,
-        feedRate: parseFloat(document.getElementById('feedRate').value) || 0,
+        targetDepth: getNum('targetDepth'),
+        passDepth: getNum('passDepth'),
+        safeZ: getNum('safeZ'),
+        spindleSpeed: getNum('spindleSpeed'),
+        feedRate: getNum('feedRate'),
         enableRapid: enableRapidCheckbox.checked,
-        rapidXY: parseFloat(rapidXYInput.value) || 0,
-        rapidZ: parseFloat(rapidZInput.value) || 0,
-        stockThickness: parseFloat(stockThicknessInput.value) || 0,
+        rapidXY: getNum('rapidXY'),
+        rapidZ: getNum('rapidZ'),
+        stockThickness: getNum('stockThickness'),
         // Tab Params
         enableTabs: enableTabsCheckbox.checked,
-        tabWidth: parseFloat(tabWidthInput.value) || 0,
-        tabThickness: parseFloat(tabThicknessInput.value) || 0,
+        tabWidth: getNum('tabWidth'),
+        tabThickness: getNum('tabThickness'),
         tabs: [...tabs] // Copy
     };
 
     // Add dynamic shape params
     if (shape === 'square') {
-        params.width = parseFloat(document.getElementById('width').value) || 0;
+        params.width = getNum('width');
         params.shapeWidth = params.width;
         params.shapeHeight = params.width;
     } else if (shape === 'rectangle') {
-        params.width = parseFloat(document.getElementById('width').value) || 0;
-        params.height = parseFloat(document.getElementById('height').value) || 0;
+        params.width = getNum('width');
+        params.height = getNum('height');
         params.shapeWidth = params.width;
         params.shapeHeight = params.height;
     } else if (shape === 'circle') {
-        params.diameter = parseFloat(document.getElementById('diameter').value) || 0;
+        params.diameter = getNum('diameter');
         params.shapeWidth = params.diameter;
         params.shapeHeight = params.diameter;
     }
 
     // Stock Params
-    const userStockW = parseFloat(stockWidthInput.value) || 0;
-    const userStockH = parseFloat(stockHeightInput.value) || 0;
+    const userStockW = getNum('stockWidth');
+    const userStockH = getNum('stockHeight');
     
     // Default to shape bounds if stock is smaller or not set
     params.stockWidth = userStockW > 0 ? userStockW : params.shapeWidth;
