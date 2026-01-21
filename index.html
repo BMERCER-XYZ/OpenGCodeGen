@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenGCodeGen - Simple G-Code Generator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="container-fluid">
+        <ul>
+            <li><strong>OpenGCodeGen</strong></li>
+        </ul>
+        <ul>
+            <li><a href="#" role="button" id="downloadBtn" class="secondary">Download .gcode</a></li>
+        </ul>
+    </nav>
+
+    <main class="container">
+        <div class="grid">
+            <!-- Left Column: Controls -->
+            <section id="controls">
+                <h3>Configuration</h3>
+                
+                <!-- Shape Selection -->
+                <label for="shapeSelect">Shape</label>
+                <select id="shapeSelect">
+                    <option value="square">Square</option>
+                    <option value="rectangle">Rectangle</option>
+                    <option value="circle">Circle</option>
+                </select>
+
+                <hr>
+
+                <!-- Dimensions (Dynamic based on shape) -->
+                <div id="dimensionInputs">
+                    <!-- Injected via JS -->
+                </div>
+
+                <!-- Stock Settings -->
+                <details open>
+                    <summary>Stock & Origin</summary>
+                    <div class="grid">
+                        <label>
+                            Stock Width (mm)
+                            <input type="number" id="stockWidth" placeholder="Auto" step="1">
+                        </label>
+                        <label>
+                            Stock Height (mm)
+                            <input type="number" id="stockHeight" placeholder="Auto" step="1">
+                        </label>
+                    </div>
+                    <label>
+                        Stock Thickness (mm)
+                        <input type="number" id="stockThickness" placeholder="Optional" step="0.5">
+                    </label>
+                    <label for="originSelect">Job Origin (Home)</label>
+                    <select id="originSelect">
+                        <optgroup label="Stock">
+                            <option value="stock-center">Center of Stock</option>
+                            <option value="stock-bottom-left">Stock Bottom Left</option>
+                            <option value="stock-bottom-right">Stock Bottom Right</option>
+                            <option value="stock-top-left">Stock Top Left</option>
+                            <option value="stock-top-right">Stock Top Right</option>
+                        </optgroup>
+                        <optgroup label="Shape">
+                            <option value="shape-center">Center of Shape</option>
+                            <option value="shape-bottom-left">Shape Bottom Left</option>
+                            <option value="shape-bottom-right">Shape Bottom Right</option>
+                            <option value="shape-top-left">Shape Top Left</option>
+                            <option value="shape-top-right">Shape Top Right</option>
+                        </optgroup>
+                    </select>
+                </details>
+
+                <!-- Tool Settings -->
+                <details open>
+                    <summary>Tool & Operation</summary>
+
+                    <label for="toolPreset">Tool Preset</label>
+                    <div class="grid">
+                        <select id="toolPreset">
+                            <option value="">Custom</option>
+                        </select>
+                        <button id="saveToolBtn" class="outline">Save Preset</button>
+                    </div>
+                    <small>Save to <code>/tool-library</code> to use later.</small>
+                    <hr>
+                    
+                    <div class="grid">
+                        <label>
+                            Tool Diameter (mm)
+                            <input type="number" id="toolDiameter" value="3.175" step="0.1">
+                        </label>
+                        <label>
+                            Operation
+                            <select id="operation">
+                                <option value="outside">Outside (Cut Out)</option>
+                                <option value="inside">Inside (Hole)</option>
+                                <option value="center">On Line (Trace)</option>
+                            </select>
+                        </label>
+                    </div>
+                </details>
+
+                <!-- Cut Settings -->
+                <details open>
+                    <summary>Cut Settings</summary>
+                    <div class="grid">
+                        <label>
+                            Target Depth (mm)
+                            <input type="number" id="targetDepth" value="5.0" step="0.5">
+                        </label>
+                        <label>
+                            Depth per Pass (mm)
+                            <input type="number" id="passDepth" value="1.0" step="0.1">
+                        </label>
+                    </div>
+                    <div class="grid">
+                        <label>
+                            Safe Z (mm)
+                            <input type="number" id="safeZ" value="5.0" step="1.0">
+                        </label>
+                        <label>
+                            Spindle Speed (RPM)
+                            <input type="number" id="spindleSpeed" value="12000" step="100">
+                        </label>
+                    </div>
+                    <label>
+                        Feed Rate (mm/min)
+                        <input type="number" id="feedRate" value="800" step="50">
+                    </label>
+
+                    <hr>
+
+                    <label>
+                        <input type="checkbox" id="enableRapid" role="switch">
+                        Enable Custom Rapid Speeds
+                    </label>
+                    <div class="grid">
+                        <label>
+                            Rapid XY (mm/min)
+                            <input type="number" id="rapidXY" value="7000" step="100" disabled>
+                        </label>
+                        <label>
+                            Rapid Z (mm/min)
+                            <input type="number" id="rapidZ" value="500" step="50" disabled>
+                        </label>
+                    </div>
+                </details>
+
+                <!-- Tab Settings -->
+                <details>
+                    <summary>Tabs</summary>
+                    <label>
+                        <input type="checkbox" id="enableTabs" role="switch">
+                        Enable Tabs
+                    </label>
+                    
+                    <div class="grid">
+                        <label>
+                            Tab Width (mm)
+                            <input type="number" id="tabWidth" value="6.0" step="0.5" disabled>
+                        </label>
+                        <label>
+                            Tab Thickness (mm)
+                            <input type="number" id="tabThickness" value="2.0" step="0.5" disabled>
+                        </label>
+                    </div>
+
+                    <div id="tabContainer" style="display: none;">
+                        <hr>
+                        <h6>Tab Locations</h6>
+                        <div id="tabList">
+                            <!-- Dynamic Tabs -->
+                        </div>
+                        <button id="addTabBtn" class="outline small" style="margin-top: 1rem;">+ Add Tab</button>
+                    </div>
+                </details>
+            </section>
+
+            <!-- Right Column: Preview & Output -->
+            <section id="preview-area">
+                <article>
+                    <header>Preview</header>
+                    <div class="canvas-container">
+                        <canvas id="previewCanvas" width="500" height="400"></canvas>
+                    </div>
+                    <footer>
+                        <small>Grid: 10mm spacing. Origin (0,0) is center of canvas.</small>
+                    </footer>
+                </article>
+
+                <label for="gcodeOutput">G-Code Output</label>
+                <textarea id="gcodeOutput" rows="10" readonly></textarea>
+            </section>
+        </div>
+    </main>
+
+    <footer class="container">
+        <small>Generated for X-Carve. Always verify G-code before running.</small>
+    </footer>
+
+    <script type="module" src="ui.js"></script>
+</body>
+</html>

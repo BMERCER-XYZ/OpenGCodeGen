@@ -1,0 +1,7 @@
+{
+    "toolDiameter": 3.175,
+    "feedRate": 600,
+    "spindleSpeed": 10000,
+    "passDepth": 0.5,
+    "safeZ": 5.0
+}

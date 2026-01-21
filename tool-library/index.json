@@ -1,0 +1,5 @@
+[
+    { "name": "1/8\" Straight Cut End Mill", "file": "1-8_endmill_softwood.json" },
+    { "name": "1/4\" End Mill (MDF)", "file": "1-4_endmill_mdf.json" },
+    { "name": "1/8\" End Mill (Acrylic)", "file": "1-8_endmill_acrylic.json" }
+]
