@@ -80,7 +80,6 @@ function renderDimensions(shape) {
 function attachListeners() {
     shapeSelect.addEventListener('change', (e) => {
         const newShape = e.target.value;
-        const oldShapeParams = getParams(); // We can't know the previous shape easily unless we store it, but checking tabs is enough
         
         // Clear tabs if switching logic (Rect <-> Circle)
         const isRect = s => s === 'square' || s === 'rectangle';
