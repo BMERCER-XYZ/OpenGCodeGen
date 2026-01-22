@@ -1,4 +1,5 @@
 import { GCodeGenerator } from './generator.js';
+import { init3D, update3D, resize3D } from './visualizer3d.js';
 
 const generator = new GCodeGenerator();
 
@@ -28,6 +29,11 @@ const tabContainer = document.getElementById('tabContainer');
 const tabList = document.getElementById('tabList');
 const addTabBtn = document.getElementById('addTabBtn');
 
+// View Tabs
+const threeContainer = document.getElementById('three-container');
+const tabButtons = document.querySelectorAll('.tab-btn');
+const tabContents = document.querySelectorAll('.tab-content');
+
 // Input IDs to track for changes
 const inputs = [
     'toolDiameter', 'operation', 'targetDepth', 'passDepth', 
@@ -53,7 +59,32 @@ function init() {
     renderDimensions('square'); // Default
     loadToolLibrary();
     attachListeners();
+    setupTabs();
+    
+    // Init 3D Scene
+    init3D(threeContainer);
+    
     update();
+}
+
+function setupTabs() {
+    tabButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            // Remove active
+            tabButtons.forEach(b => b.classList.remove('active'));
+            tabContents.forEach(c => c.classList.remove('active'));
+            
+            // Add active
+            btn.classList.add('active');
+            const targetId = btn.dataset.tab;
+            document.getElementById(targetId).classList.add('active');
+            
+            // Trigger 3D Resize if needed
+            if (targetId === 'view-3d') {
+                setTimeout(() => resize3D(), 50);
+            }
+        });
+    });
 }
 
 function renderDimensions(shape) {
@@ -279,6 +310,9 @@ function update() {
 
     // Draw Preview
     drawPreview(params);
+    
+    // Draw 3D
+    update3D(code, params);
 }
 
 function drawPreview(params) {

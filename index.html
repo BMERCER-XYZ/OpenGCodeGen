@@ -5,11 +5,65 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpenGCodeGen - Simple G-Code Generator</title>
     <link rel="stylesheet" href="style.css">
+    
+    <!-- Import Map for Three.js -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <style>
+        /* Simple Tab Styles */
+        .tab-nav {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .tab-btn {
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            font-weight: bold;
+            color: #888;
+        }
+        .tab-btn.active {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        #three-container {
+            width: 100%;
+            height: 400px;
+            background: #000;
+            overflow: hidden;
+        }
+    </style>
 </head>
 <body>
     <nav class="container-fluid">
-        <ul>
-            <li><strong>OpenGCodeGen</strong></li>
+        <ul style="flex-grow: 1; justify-content: center;">
+            <li>
+                <pre style="font-family: monospace; font-size: 6px; line-height: 6px; margin: 0; color: var(--primary-color);">
+   ____                      ______      ______          __        ______                           __            
+  / __ \____  ___  ____     / ____/     / ____/___  ____/ /__     / ____/__  ____  ___  _________ _/ /_____  _____
+ / / / / __ \/ _ \/ __ \   / / ________/ /   / __ \/ __  / _ \   / / __/ _ \/ __ \/ _ \/ ___/ __ `/ __/ __ \/ ___/
+/ /_/ / /_/ /  __/ / / /  / /_/ /_____/ /___/ /_/ / /_/ /  __/  / /_/ /  __/ / / /  __/ /  / /_/ / /_/ /_/ / /    
+\____/ .___/\___/_/ /_/   \____/      \____/\____/\__,_/\___/   \____/\___/_/ /_/\___/_/   \__,_/\__/\____/_/     
+    /_/                                                                                                           
+                </pre>
+            </li>
         </ul>
         <ul>
             <li><a href="#" role="button" id="downloadBtn" class="secondary">Download .gcode</a></li>
@@ -17,9 +71,10 @@
     </nav>
 
     <main class="container">
-        <div class="grid">
-            <!-- Left Column: Controls -->
-            <section id="controls">
+        <!-- Top Row: Left Controls | Visualizer | Right Controls -->
+        <div class="grid main-grid">
+            <!-- Left Column: Shape & Stock -->
+            <section id="controls-left">
                 <h3>Configuration</h3>
                 
                 <!-- Shape Selection -->
@@ -72,7 +127,43 @@
                         </optgroup>
                     </select>
                 </details>
+            </section>
 
+            <!-- Center Column: Visualizer -->
+            <section id="preview-area">
+                <article>
+                    <nav class="tab-nav">
+                        <button class="tab-btn active" data-tab="view-2d">2D Preview</button>
+                        <button class="tab-btn" data-tab="view-3d">3D Visualizer</button>
+                        <button class="tab-btn" data-tab="view-gcode">G-Code</button>
+                    </nav>
+
+                    <div id="view-2d" class="tab-content active">
+                        <div class="canvas-container">
+                            <canvas id="previewCanvas" width="500" height="400"></canvas>
+                        </div>
+                        <footer>
+                            <small>Grid: 10mm spacing. Origin (0,0) is center of canvas.</small>
+                        </footer>
+                    </div>
+
+                    <div id="view-3d" class="tab-content">
+                        <div id="three-container"></div>
+                        <footer>
+                            <small>Left Click: Rotate | Right Click: Pan | Scroll: Zoom</small>
+                        </footer>
+                    </div>
+
+                    <div id="view-gcode" class="tab-content">
+                        <label for="gcodeOutput">Generated Output</label>
+                        <textarea id="gcodeOutput" rows="20" readonly></textarea>
+                    </div>
+                </article>
+            </section>
+
+            <!-- Right Column: Tool Settings -->
+            <section id="controls-right">
+                <h3>Tooling</h3>
                 <!-- Tool Settings -->
                 <details open>
                     <summary>Tool & Operation</summary>
@@ -102,8 +193,13 @@
                         </label>
                     </div>
                 </details>
+            </section>
+        </div>
 
-                <!-- Cut Settings -->
+        <!-- Bottom Row: Other Settings -->
+        <div class="grid">
+            <!-- Cut Settings -->
+            <section>
                 <details open>
                     <summary>Cut Settings</summary>
                     <div class="grid">
@@ -148,9 +244,11 @@
                         </label>
                     </div>
                 </details>
+            </section>
 
-                <!-- Tab Settings -->
-                <details>
+            <!-- Tab Settings -->
+            <section>
+                <details open>
                     <summary>Tabs</summary>
                     <label>
                         <input type="checkbox" id="enableTabs" role="switch">
@@ -177,22 +275,6 @@
                         <button id="addTabBtn" class="outline small" style="margin-top: 1rem;">+ Add Tab</button>
                     </div>
                 </details>
-            </section>
-
-            <!-- Right Column: Preview & Output -->
-            <section id="preview-area">
-                <article>
-                    <header>Preview</header>
-                    <div class="canvas-container">
-                        <canvas id="previewCanvas" width="500" height="400"></canvas>
-                    </div>
-                    <footer>
-                        <small>Grid: 10mm spacing. Origin (0,0) is center of canvas.</small>
-                    </footer>
-                </article>
-
-                <label for="gcodeOutput">G-Code Output</label>
-                <textarea id="gcodeOutput" rows="10" readonly></textarea>
             </section>
         </div>
     </main>
