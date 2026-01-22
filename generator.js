@@ -124,6 +124,11 @@ export class GCodeGenerator {
             // Start at 3 o'clock position
             return { x: r + t.x, y: 0 + t.y };
         }
+        else if (shape === 'sketch') {
+            if (p.sketchPoints && p.sketchPoints.length > 0) {
+                return { x: p.sketchPoints[0].x + t.x, y: p.sketchPoints[0].y + t.y };
+            }
+        }
         return { x: 0, y: 0 };
     }
 
@@ -136,6 +141,21 @@ export class GCodeGenerator {
         const tabTopZ = -(p.targetDepth - p.tabThickness);
         // We cut tabs if currentZ is LOWER (deeper) than the top of the tab
         const isTabPass = p.enableTabs && p.tabs && p.tabs.length > 0 && (currentZ < tabTopZ - 0.001);
+
+        if (shape === 'sketch') {
+            if (p.sketchPoints && p.sketchPoints.length > 1) {
+                // Sketch points are relative to center (0,0)
+                // We are already at point 0.
+                for (let i = 1; i < p.sketchPoints.length; i++) {
+                    const pt = p.sketchPoints[i];
+                    moves.push(`G1 X${(pt.x + t.x).toFixed(3)} Y${(pt.y + t.y).toFixed(3)} F${feedRate}`);
+                }
+                // Close loop (Sketcher doesn't duplicate last point)
+                const start = p.sketchPoints[0];
+                moves.push(`G1 X${(start.x + t.x).toFixed(3)} Y${(start.y + t.y).toFixed(3)} F${feedRate}`);
+            }
+            return moves;
+        }
 
         if (shape === 'square' || shape === 'rectangle') {
             const wRaw = (shape === 'square' ? p.width : p.width);

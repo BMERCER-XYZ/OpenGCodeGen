@@ -78,11 +78,12 @@
                 <h3>Configuration</h3>
                 
                 <!-- Shape Selection -->
-                <label for="shapeSelect">Shape</label>
+                <label for="shapeSelect">Geometry</label>
                 <select id="shapeSelect">
                     <option value="square">Square</option>
                     <option value="rectangle">Rectangle</option>
                     <option value="circle">Circle</option>
+                    <option value="sketch">Sketch</option>
                 </select>
 
                 <hr>
@@ -135,6 +136,7 @@
                     <nav class="tab-nav">
                         <button class="tab-btn active" data-tab="view-2d">2D Preview</button>
                         <button class="tab-btn" data-tab="view-3d">3D Visualizer</button>
+                        <button class="tab-btn" data-tab="view-sketch">Sketch</button>
                         <button class="tab-btn" data-tab="view-gcode">G-Code</button>
                     </nav>
 
@@ -152,6 +154,26 @@
                         <footer>
                             <small>Left Click: Rotate | Right Click: Pan | Scroll: Zoom</small>
                         </footer>
+                    </div>
+
+                    <div id="view-sketch" class="tab-content">
+                        <div style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                            <button id="clearSketchBtn" class="outline small secondary">Clear</button>
+                            <span style="border-left: 1px solid #ccc; height: 20px; margin: 0 5px;"></span>
+                            <small>Zoom:</small>
+                            <button id="zoomInBtn" class="outline small">+</button>
+                            <button id="zoomOutBtn" class="outline small">-</button>
+                            <span style="border-left: 1px solid #ccc; height: 20px; margin: 0 5px;"></span>
+                            <small>Grid:</small>
+                            <button id="gridIncBtn" class="outline small">+</button>
+                            <span id="gridSizeDisplay">10mm</span>
+                            <button id="gridDecBtn" class="outline small">-</button>
+                            
+                            <small style="margin-left: auto;">Click start to close.</small>
+                        </div>
+                        <div class="canvas-container">
+                            <canvas id="sketchCanvas" width="500" height="400"></canvas>
+                        </div>
                     </div>
 
                     <div id="view-gcode" class="tab-content">
@@ -280,7 +302,7 @@
     </main>
 
     <footer class="container">
-        <small>Generated for X-Carve. Always verify G-code before running.</small>
+        <small>Proudly Build By BMERCER.XYZ</small>
     </footer>
 
     <script type="module" src="ui.js"></script>

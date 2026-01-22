@@ -1,7 +1,9 @@
 import { GCodeGenerator } from './generator.js';
 import { init3D, update3D, resize3D } from './visualizer3d.js';
+import { Sketcher } from './sketcher.js';
 
 const generator = new GCodeGenerator();
+let sketcher; // Instance
 
 // DOM Elements
 const shapeSelect = document.getElementById('shapeSelect');
@@ -20,6 +22,12 @@ const rapidXYInput = document.getElementById('rapidXY');
 const rapidZInput = document.getElementById('rapidZ');
 const stockThicknessInput = document.getElementById('stockThickness');
 const targetDepthInput = document.getElementById('targetDepth');
+const clearSketchBtn = document.getElementById('clearSketchBtn');
+const zoomInBtn = document.getElementById('zoomInBtn');
+const zoomOutBtn = document.getElementById('zoomOutBtn');
+const gridIncBtn = document.getElementById('gridIncBtn');
+const gridDecBtn = document.getElementById('gridDecBtn');
+const gridSizeDisplay = document.getElementById('gridSizeDisplay');
 
 // Tab DOM Elements
 const enableTabsCheckbox = document.getElementById('enableTabs');
@@ -52,7 +60,8 @@ const shapeConfigs = {
         { id: 'width', label: 'Width (mm)', value: 80 },
         { id: 'height', label: 'Height (mm)', value: 40 }
     ],
-    circle: [{ id: 'diameter', label: 'Diameter (mm)', value: 50 }]
+    circle: [{ id: 'diameter', label: 'Diameter (mm)', value: 50 }],
+    sketch: [] // No dimensions for sketch
 };
 
 function init() {
@@ -64,32 +73,45 @@ function init() {
     // Init 3D Scene
     init3D(threeContainer);
     
+    // Init Sketcher
+    sketcher = new Sketcher('sketchCanvas');
+    sketcher.onUpdate(update);
+    
     update();
 }
 
 function setupTabs() {
     tabButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            // Remove active
-            tabButtons.forEach(b => b.classList.remove('active'));
-            tabContents.forEach(c => c.classList.remove('active'));
-            
-            // Add active
-            btn.classList.add('active');
-            const targetId = btn.dataset.tab;
-            document.getElementById(targetId).classList.add('active');
-            
-            // Trigger 3D Resize if needed
-            if (targetId === 'view-3d') {
-                setTimeout(() => resize3D(), 50);
-            }
-        });
+        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
     });
+}
+
+function switchTab(targetId) {
+    // Remove active
+    tabButtons.forEach(b => {
+        if(b.dataset.tab === targetId) b.classList.add('active');
+        else b.classList.remove('active');
+    });
+    
+    tabContents.forEach(c => {
+        if(c.id === targetId) c.classList.add('active');
+        else c.classList.remove('active');
+    });
+    
+    // Trigger 3D Resize if needed
+    if (targetId === 'view-3d') {
+        setTimeout(() => resize3D(), 50);
+    }
 }
 
 function renderDimensions(shape) {
     dimensionInputs.innerHTML = '';
     const config = shapeConfigs[shape];
+    
+    if (shape === 'sketch') {
+        dimensionInputs.innerHTML = '<small>Draw your shape in the "Sketch" tab.</small>';
+        return;
+    }
     
     config.forEach(field => {
         const div = document.createElement('div');
@@ -115,10 +137,6 @@ function attachListeners() {
         // Clear tabs if switching logic (Rect <-> Circle)
         const isRect = s => s === 'square' || s === 'rectangle';
         if (tabs.length > 0) {
-            // If switching from Circle to Rect or vice-versa, clear tabs
-            // Actually, just clear tabs on any shape change for safety/simplicity in this version
-            // Or better: Preserve if compatible.
-            // Check if existing tabs have 'angle' but new shape is rect...
             const hasAngle = tabs[0].angle !== undefined;
             const newIsRect = isRect(newShape);
             
@@ -129,6 +147,11 @@ function attachListeners() {
 
         renderDimensions(newShape);
         renderTabs();
+        
+        if (newShape === 'sketch') {
+            switchTab('view-sketch');
+        }
+        
         update();
     });
     
@@ -137,6 +160,23 @@ function attachListeners() {
     inputs.forEach(id => {
         const el = document.getElementById(id);
         if(el) el.addEventListener('input', update);
+    });
+    
+    clearSketchBtn.addEventListener('click', () => {
+        sketcher.clear();
+    });
+
+    zoomInBtn.addEventListener('click', () => sketcher.zoom(1.2));
+    zoomOutBtn.addEventListener('click', () => sketcher.zoom(0.8));
+    
+    gridIncBtn.addEventListener('click', () => {
+        const s = sketcher.changeGrid(5);
+        gridSizeDisplay.textContent = s + 'mm';
+    });
+    
+    gridDecBtn.addEventListener('click', () => {
+        const s = sketcher.changeGrid(-5);
+        gridSizeDisplay.textContent = s + 'mm';
     });
 
     enableRapidCheckbox.addEventListener('change', (e) => {
@@ -195,6 +235,11 @@ function updateTab(index, key, value) {
 function renderTabs() {
     tabList.innerHTML = '';
     const shape = shapeSelect.value;
+    
+    if (shape === 'sketch') {
+        tabList.innerHTML = '<small>Tabs not supported for custom sketches yet.</small>';
+        return;
+    }
     
     tabs.forEach((tab, index) => {
         const row = document.createElement('div');
@@ -270,7 +315,8 @@ function getParams() {
         enableTabs: enableTabsCheckbox.checked,
         tabWidth: getNum('tabWidth'),
         tabThickness: getNum('tabThickness'),
-        tabs: [...tabs] // Copy
+        tabs: [...tabs], // Copy
+        sketchPoints: sketcher ? sketcher.getPoints() : []
     };
 
     // Add dynamic shape params
@@ -287,6 +333,19 @@ function getParams() {
         params.diameter = getNum('diameter');
         params.shapeWidth = params.diameter;
         params.shapeHeight = params.diameter;
+    } else if (shape === 'sketch') {
+        // Calculate bounds of sketch for stock auto-size
+        if (params.sketchPoints.length > 0) {
+            const xs = params.sketchPoints.map(p => p.x);
+            const ys = params.sketchPoints.map(p => p.y);
+            const w = Math.max(...xs) - Math.min(...xs);
+            const h = Math.max(...ys) - Math.min(...ys);
+            params.shapeWidth = w;
+            params.shapeHeight = h;
+        } else {
+            params.shapeWidth = 0;
+            params.shapeHeight = 0;
+        }
     }
 
     // Stock Params
@@ -404,127 +463,132 @@ function drawPreview(params) {
     ctx.arc(axisX, axisY, 4, 0, Math.PI * 2);
     ctx.fill();
 
-    // Draw Shape (Centered in Stock -> Centered at cx, cy)
-    let w = 0, h = 0, r = 0;
-    if (params.shape === 'square') { w = params.width; h = params.width; }
-    if (params.shape === 'rectangle') { w = params.width; h = params.height; }
-    if (params.shape === 'circle') { r = params.diameter / 2; w = params.diameter; h = params.diameter; }
-
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    if (params.shape === 'circle') {
-        ctx.arc(cx, cy, r * scale, 0, Math.PI * 2);
+    // Draw Shape
+    if (params.shape === 'sketch') {
+        if (params.sketchPoints.length > 0) {
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            // Need to transform logic points (relative to Sketch Center (0,0)) to Canvas Preview
+            // But Wait, where is (0,0) in Sketch? It's the center of the canvas.
+            // Where is (0,0) in G-Code? It's determined by Job Origin.
+            // The visualizer draws things relative to Stock Center `cx, cy` if Job Origin is centered?
+            // Actually `drawPreview` assumes shape is centered in stock.
+            // For Sketch, the points are absolute relative to sketch origin.
+            // Let's assume Sketch Origin (0,0) aligns with Job Origin (0,0) or Center of Shape?
+            
+            // Simplest: Treat Sketch Points as relative to Stock Center (if origin is stock center).
+            // Or just draw them relative to `axisX, axisY` (which is the Job Origin).
+            // Yes, standard G-Code thinking: The drawn points are coordinates relative to (0,0).
+            // So we draw them relative to `axisX` and `axisY`.
+            // Wait, Y needs inversion because Canvas Y is Down.
+            
+            params.sketchPoints.forEach((p, i) => {
+                const px = axisX + (p.x * scale);
+                const py = axisY - (p.y * scale); // Invert Y for Cartesian
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            });
+            ctx.closePath();
+            ctx.stroke();
+        }
     } else {
-        ctx.rect(cx - (w/2 * scale), cy - (h/2 * scale), w * scale, h * scale);
+        // Standard Shape
+        let w = 0, h = 0, r = 0;
+        if (params.shape === 'square') { w = params.width; h = params.width; }
+        if (params.shape === 'rectangle') { w = params.width; h = params.height; }
+        if (params.shape === 'circle') { r = params.diameter / 2; w = params.diameter; h = params.diameter; }
+
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        if (params.shape === 'circle') {
+            ctx.arc(cx, cy, r * scale, 0, Math.PI * 2);
+        } else {
+            ctx.rect(cx - (w/2 * scale), cy - (h/2 * scale), w * scale, h * scale);
+        }
+        ctx.stroke();
     }
-    ctx.stroke();
 
     // Draw Toolpath (Red Dashed)
-    let offset = 0;
-    if (params.operation === 'outside') offset = params.toolDiameter / 2;
-    if (params.operation === 'inside') offset = -params.toolDiameter / 2;
-
-    ctx.strokeStyle = '#0000ff'; // Blue toolpath
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
+    // ... For sketch, toolpath logic is in Generator.
+    // If Generator produces output, we can't easily visualize the offset path here without duplicating logic.
+    // But we can visualize the generated G-Code in 2D? No, `drawPreview` is "Ideal Shape".
+    // The "Toolpath" visualization is currently simplified (just offset rect).
+    // For Sketch, we might skip the dashed blue line here or implement simple offset.
+    // Let's skip for sketch for now, rely on 3D viz for true toolpath.
     
-    if (params.shape === 'circle') {
-        const pathR = r + offset;
-        if (pathR > 0) ctx.arc(cx, cy, pathR * scale, 0, Math.PI * 2);
-    } else {
-        const pathW = w + (offset * 2);
-        const pathH = h + (offset * 2);
-        if (pathW > 0 && pathH > 0) {
-            ctx.rect(cx - (pathW/2 * scale), cy - (pathH/2 * scale), pathW * scale, pathH * scale);
+    if (params.shape !== 'sketch') {
+        let offset = 0;
+        if (params.operation === 'outside') offset = params.toolDiameter / 2;
+        if (params.operation === 'inside') offset = -params.toolDiameter / 2;
+
+        ctx.strokeStyle = '#0000ff'; // Blue toolpath
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        
+        if (params.shape === 'circle') {
+            let r = params.diameter / 2;
+            const pathR = r + offset;
+            if (pathR > 0) ctx.arc(cx, cy, pathR * scale, 0, Math.PI * 2);
+        } else {
+            let w = params.width; if(params.shape==='square') w=params.width;
+            let h = params.height; if(params.shape==='square') h=params.width;
+            const pathW = w + (offset * 2);
+            const pathH = h + (offset * 2);
+            if (pathW > 0 && pathH > 0) {
+                ctx.rect(cx - (pathW/2 * scale), cy - (pathH/2 * scale), pathW * scale, pathH * scale);
+            }
         }
+        ctx.stroke();
+        ctx.setLineDash([]);
     }
-    ctx.stroke();
-    ctx.setLineDash([]);
 
     // Draw Tabs (Yellow Blocks)
-    if (params.enableTabs && params.tabs.length > 0) {
+    if (params.enableTabs && params.tabs.length > 0 && params.shape !== 'sketch') {
+        // ... existing tab drawing ...
         ctx.fillStyle = 'rgba(255, 255, 0, 0.7)';
         ctx.strokeStyle = '#cca300';
         
-        // Tab visualization logic
-        // We need to calculate tab positions relative to center (cx, cy)
-        // Similar to generator logic, but visual only
+        const tW = params.tabWidth * scale; 
         
-        // Rect: width/height are w, h
-        // Circle: radius r
-        
-        const tW = params.tabWidth * scale; // Scaled tab width
-        // For visualization, we just draw a box at the location
-        
+        let w = params.width; if(params.shape==='square') w=params.width;
+        let h = params.height; if(params.shape==='square') h=params.width;
+        let r = params.diameter/2;
+
         params.tabs.forEach(tab => {
             let tx = cx; 
             let ty = cy;
             
-            // Adjust for offset (tool radius) if we want to show them on the toolpath
-            // Or just show them on the shape edge? Shape edge is clearer for "Tabs".
-            // Let's show on shape edge.
-            
             if (params.shape === 'circle') {
-                const angleRad = (tab.angle * Math.PI) / 180;
-                tx = cx + (r * scale * Math.cos(angleRad));
-                ty = cy + (r * scale * Math.sin(angleRad)); // Canvas Y is down, but standard math is up? 
-                // In canvas, positive Y is down. 
-                // 0 degrees is usually Right (3 oclock). 
-                // 90 degrees: cos=0, sin=1 -> Down. (6 oclock).
-                // If we want standard Cartesian (CCW from East), we need -sin for Y.
-                // But G-code usually follows standard engineering.
-                // Let's assume 0 = East, 90 = North (Up).
-                // So Y should be -sin.
-                // Re-calculating for standard math:
                 const stdAngleRad = (tab.angle * Math.PI) / 180;
                 tx = cx + (r * scale * Math.cos(stdAngleRad));
                 ty = cy - (r * scale * Math.sin(stdAngleRad)); 
-                
-                // Draw a circle for the tab?
                 ctx.beginPath();
                 ctx.arc(tx, ty, tW/2, 0, Math.PI*2);
                 ctx.fill();
                 ctx.stroke();
-                
             } else {
-                // Rect
-                // w, h are unscaled params
                 const halfW = (w * scale) / 2;
                 const halfH = (h * scale) / 2;
-                const tabOffset = (tab.offset / 100); // 0.0 to 1.0
-                
-                // Side definitions:
-                // Bottom: y = +halfH, x goes from -halfW to +halfW? 
-                // Let's define standard direction:
-                // Bottom: Left -> Right
-                // Right: Bottom -> Top
-                // Top: Right -> Left
-                // Left: Top -> Bottom
-                // (Matches CCW cutting usually)
+                const tabOffset = (tab.offset / 100); 
                 
                 if (tab.side === 'bottom') {
-                    // Along bottom edge: from Left (-halfW) to Right (+halfW)
                     tx = cx - halfW + (w * scale * tabOffset);
                     ty = cy + halfH;
                 } else if (tab.side === 'right') {
                     tx = cx + halfW;
-                    ty = cy + halfH - (h * scale * tabOffset); // Upwards
+                    ty = cy + halfH - (h * scale * tabOffset); 
                 } else if (tab.side === 'top') {
-                    // Right to Left? Or Left to Right? 
-                    // Usually "50%" means center regardless.
-                    // Let's assume Left->Right for Top to be intuitive for UI "Position %"
                     tx = cx - halfW + (w * scale * tabOffset);
                     ty = cy - halfH;
                 } else if (tab.side === 'left') {
-                    // Bottom to Top?
                     tx = cx - halfW;
                     ty = cy + halfH - (h * scale * tabOffset); 
                 }
-                
-                // Draw rect centered at tx, ty
-                ctx.fillRect(tx - tW/2, ty - tW/2, tW, tW); // Square marker
+                ctx.fillRect(tx - tW/2, ty - tW/2, tW, tW); 
                 ctx.strokeRect(tx - tW/2, ty - tW/2, tW, tW);
             }
         });
