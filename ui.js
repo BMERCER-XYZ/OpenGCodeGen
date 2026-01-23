@@ -82,7 +82,7 @@ function switchTab(targetId) {
     });
     
     if (targetId === 'view-3d' && staticViewer) setTimeout(() => staticViewer.resize(), 50);
-    if (targetId === 'view-sim' && simViewer) setTimeout(() => simViewer.resize(), 50);
+    if (targetId === 'view-combined' && simViewer) setTimeout(() => simViewer.resize(), 50);
 }
 
 function renderDimensions(shape) {
@@ -168,6 +168,22 @@ function attachListeners() {
         simViewer.setSpeed(simSpeed);
     });
 
+    const rapidCheck = getEl('enableRapid');
+    if(rapidCheck) {
+        rapidCheck.addEventListener('change', (e) => {
+            const enabled = e.target.checked;
+            getEl('rapidXY').disabled = !enabled;
+            getEl('rapidZ').disabled = !enabled;
+        });
+    }
+
+    const stInput = getEl('stockThickness');
+    if(stInput) {
+        stInput.addEventListener('input', (e) => {
+            if(e.target.value) getEl('targetDepth').value = e.target.value;
+        });
+    }
+    
     // Tab Listeners
     const tabCheck = getEl('enableTabs');
     if (tabCheck) {
@@ -189,24 +205,6 @@ function attachListeners() {
     
     const savePreset = getEl('saveToolBtn');
     if(savePreset) savePreset.addEventListener('click', saveToolPreset);
-    
-    // Rapid Checkbox
-    const rapidCheck = getEl('enableRapid');
-    if(rapidCheck) {
-        rapidCheck.addEventListener('change', (e) => {
-            const enabled = e.target.checked;
-            getEl('rapidXY').disabled = !enabled;
-            getEl('rapidZ').disabled = !enabled;
-        });
-    }
-    
-    // Stock Thickness
-    const stInput = getEl('stockThickness');
-    if(stInput) {
-        stInput.addEventListener('input', (e) => {
-            if(e.target.value) getEl('targetDepth').value = e.target.value;
-        });
-    }
 }
 
 function addTab() {
@@ -227,7 +225,6 @@ function removeTab(index) {
 function updateTab(index, key, value) {
     tabs[index][key] = value;
 }
-// Export for inline HTML calls
 window.updateTab = updateTab;
 
 function renderTabs() {
@@ -357,15 +354,14 @@ function update() {
         getEl('gcodeOutput').value = code;
 
         drawPreview(params);
-    // Draw 3D
-    if (staticViewer) staticViewer.update(code, params);
-    if (simViewer) {
-        const stats = simViewer.update(code, params);
-        if (stats) {
-            getEl('estTotalTime').textContent = formatTime(stats.totalTime);
-            getEl('estPassTime').textContent = formatTime(stats.avgPassTime);
+        if (staticViewer) staticViewer.update(code, params);
+        if (simViewer) {
+            const stats = simViewer.update(code, params);
+            if (stats) {
+                getEl('estTotalTime').textContent = formatTime(stats.totalTime);
+                getEl('estPassTime').textContent = formatTime(stats.avgPassTime);
+            }
         }
-    }
     } catch (e) {
         console.error("Update failed:", e);
     }
