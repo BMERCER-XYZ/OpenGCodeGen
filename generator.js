@@ -30,29 +30,35 @@ export class GCodeGenerator {
         // Initial Safe Z
         lines.push(`${this.getRapidZ(p.safeZ)} ; Move to safe Z`);
 
-        // Calculate offset based on operation type
-        let offset = 0;
-        if (p.operation === 'outside') offset = p.toolDiameter / 2;
-        if (p.operation === 'inside') offset = -p.toolDiameter / 2;
-        // center = 0
+        if (p.opType === 'facing') {
+            this.generateFacing(lines, p);
+        } else {
+            // Contour / Sketch Logic
+            
+            // Calculate offset based on operation type
+            let offset = 0;
+            if (p.operation === 'outside') offset = p.toolDiameter / 2;
+            if (p.operation === 'inside') offset = -p.toolDiameter / 2;
+            // center = 0
 
-        // Generate passes
-        let currentZ = 0;
-        while (currentZ > -p.targetDepth) {
-            currentZ -= p.passDepth;
-            if (currentZ < -p.targetDepth) currentZ = -p.targetDepth;
-            
-            lines.push(`; Pass at Z=${currentZ.toFixed(2)}`);
-            
-            // Move to start position (Rapid)
-            const startPos = this.getStartPosition(p.shape, offset);
-            lines.push(this.getRapidXY(startPos.x, startPos.y));
-            
-            // Plunge
-            lines.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`); // Plunge at half feed usually safer
-            
-            // Cut Path
-            lines.push(...this.getShapePath(p.shape, offset, p.feedRate, currentZ));
+            // Generate passes
+            let currentZ = 0;
+            while (currentZ > -p.targetDepth) {
+                currentZ -= p.passDepth;
+                if (currentZ < -p.targetDepth) currentZ = -p.targetDepth;
+                
+                lines.push(`; Pass at Z=${currentZ.toFixed(2)}`);
+                
+                // Move to start position (Rapid)
+                const startPos = this.getStartPosition(p.shape, offset);
+                lines.push(this.getRapidXY(startPos.x, startPos.y));
+                
+                // Plunge
+                lines.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`); // Plunge at half feed usually safer
+                
+                // Cut Path
+                lines.push(...this.getShapePath(p.shape, offset, p.feedRate, currentZ));
+            }
         }
 
         // Footer
@@ -61,6 +67,86 @@ export class GCodeGenerator {
         lines.push('M30 ; End of program');
 
         return lines.join('\n');
+    }
+
+    generateFacing(lines, p) {
+        // Facing Logic: Zig-Zag over the Shape area (Rectangular bounding box)
+        // If Shape is Circle, we still face the bounding box? Or implement Circular facing?
+        // Let's implement Rectangular Zig-Zag for all shapes for simplicity in V1, 
+        // effectively facing the bounding box.
+        
+        let w = 0, h = 0;
+        if (p.shape === 'square') { w = p.width; h = p.width; }
+        else if (p.shape === 'rectangle') { w = p.width; h = p.height; }
+        else if (p.shape === 'circle') { w = p.diameter; h = p.diameter; }
+        else if (p.shape === 'sketch') { w = p.shapeWidth; h = p.shapeHeight; } // Calculated in ui.js
+        
+        // Adjust for Tool Diameter? 
+        // Usually facing extends PAST the edge by tool radius to clear edges.
+        // Bounds: -w/2 to +w/2.
+        // Cut Extent: -w/2 - r to +w/2 + r.
+        const r = p.toolDiameter / 2;
+        const passExtX = p.passExtX || 0;
+        const passExtY = p.passExtY || 0;
+        
+        const startX = -(w/2) - r - passExtX; // Overhang + Extension
+        const endX = (w/2) + r + passExtX;
+        const startY = -(h/2) - r - passExtY;
+        const endY = (h/2) + r + passExtY; // Ensure we cover this
+        
+        const step = p.stepover > 0 ? p.stepover : (p.toolDiameter * 0.4); // Default fallback
+        const t = this.getTranslation();
+
+        let currentZ = 0;
+        while (currentZ > -p.targetDepth) {
+            currentZ -= p.passDepth;
+            if (currentZ < -p.targetDepth) currentZ = -p.targetDepth;
+            
+            lines.push(`; Facing Pass at Z=${currentZ.toFixed(2)}`);
+            
+            let y = startY;
+            let direction = 1; // 1 = Left to Right, -1 = Right to Left
+            
+            // Move to Start of this level
+            lines.push(this.getRapidXY(startX + t.x, y + t.y));
+            lines.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`);
+            
+            while (y <= endY + 0.001) { // 0.001 epsilon
+                // Cut X
+                const targetX = direction === 1 ? endX : startX;
+                lines.push(`G1 X${(targetX + t.x).toFixed(3)} Y${(y + t.y).toFixed(3)} F${p.feedRate}`);
+                
+                // Stepover Y if not finished
+                if (y < endY) {
+                    let nextY = y + step;
+                    if (nextY > endY) nextY = endY; // Clamp to end? 
+                    // If we clamp, we might cut same line twice or partial. 
+                    // Better to go slightly past or stop? 
+                    // If y was startY (-50), endY (+50). Step 10.
+                    // -50, -40, ..., 40, 50. Perfect.
+                    // If Step 12. -50 -> X move. Step to -38. X move...
+                    // Eventually we reach close to 50.
+                    // If current y < endY, we step.
+                    // If nextY > endY, we set nextY = endY and do one last pass? Yes.
+                    
+                    lines.push(`G1 X${(targetX + t.x).toFixed(3)} Y${(nextY + t.y).toFixed(3)} F${p.feedRate}`);
+                    y = nextY;
+                    direction *= -1;
+                    
+                    if (y === endY && nextY === endY) { // Loop logic check
+                         // If we stepped exactly to endY, the while loop condition y<=endY runs again.
+                         // But we just did the Y-move. We need to do the X-move at endY.
+                         // The loop handles "Cut X".
+                         // So we just update y and loop.
+                    }
+                } else {
+                    break; // Finished Y extent
+                }
+            }
+            
+            // Retract for next Z pass
+            lines.push(this.getRapidZ(p.safeZ));
+        }
     }
 
     getRapidZ(z) {

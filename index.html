@@ -217,18 +217,18 @@
                     <small>Save to <code>/tool-library</code> to use later.</small>
                     <hr>
                     
+                    <label>
+                        Operation Type
+                        <select id="opType">
+                            <option value="contour">2D Contour</option>
+                            <option value="facing">Facing</option>
+                        </select>
+                    </label>
+
                     <div class="grid">
                         <label>
                             Tool Diameter (mm)
                             <input type="number" id="toolDiameter" value="3.175" step="0.1">
-                        </label>
-                        <label>
-                            Operation
-                            <select id="operation">
-                                <option value="outside">Outside (Cut Out)</option>
-                                <option value="inside">Inside (Hole)</option>
-                                <option value="center">On Line (Trace)</option>
-                            </select>
                         </label>
                     </div>
                 </details>
@@ -285,9 +285,41 @@
                 </details>
             </section>
 
-            <!-- Tab Settings -->
+            <!-- Configuration Row -->
             <section>
+                <!-- Operation Configuration -->
                 <details open>
+                    <summary>Operation Configuration</summary>
+                    
+                    <div id="contourConfig">
+                        <label>
+                            Contour Side
+                            <select id="operation">
+                                <option value="outside">Outside (Cut Out)</option>
+                                <option value="inside">Inside (Hole)</option>
+                                <option value="center">On Line (Trace)</option>
+                            </select>
+                        </label>
+                    </div>
+
+                    <div id="facingConfig" class="grid">
+                        <label>
+                            Stepover (mm)
+                            <input type="number" id="stepover" value="1.5" step="0.1">
+                        </label>
+                        <label>
+                            Pass Extension X (mm)
+                            <input type="number" id="passExtX" value="0.0" step="1.0">
+                        </label>
+                        <label>
+                            Pass Extension Y (mm)
+                            <input type="number" id="passExtY" value="0.0" step="1.0">
+                        </label>
+                    </div>
+                </details>
+
+                <!-- Tab Settings -->
+                <details>
                     <summary>Tabs</summary>
                     <label>
                         <input type="checkbox" id="enableTabs" role="switch">
