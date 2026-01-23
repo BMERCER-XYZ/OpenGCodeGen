@@ -7,7 +7,7 @@ const COLOR_RAPID = 0xff0000;
 const COLOR_FEED = 0x0000ff;
 const COLOR_GRID = 0x888888;
 const COLOR_BG = 0x0b0b10;
-const COLOR_TOOL = 0xffff00; // Yellow tool
+const COLOR_TOOL = 0xFF00FF; // Magenta tool
 
 export class GCodeViewer {
     constructor(container) {
@@ -30,6 +30,7 @@ export class GCodeViewer {
         this.baseSpeed = 1000; // mm/min visual baseline
         this.lastTime = 0;
         this.progressCallback = null;
+        this.zOffset = 0; // Shift to sit on grid
 
         this.init();
     }
@@ -70,8 +71,8 @@ export class GCodeViewer {
         const grid = new THREE.GridHelper(500, 50, COLOR_GRID, 0x444444);
         grid.rotation.x = Math.PI / 2;
         this.scene.add(grid);
-        const axes = new THREE.AxesHelper(20);
-        this.scene.add(axes);
+        this.axesHelper = new THREE.AxesHelper(20);
+        this.scene.add(this.axesHelper);
 
         // Tool Mesh (Cone)
         const toolGeom = new THREE.ConeGeometry(2, 10, 16);
@@ -118,6 +119,8 @@ export class GCodeViewer {
         const w = params.stockWidth || 100;
         const h = params.stockHeight || 100;
         const t = params.stockThickness || 1;
+        this.zOffset = t;
+        if(this.axesHelper) this.axesHelper.position.z = this.zOffset;
 
         const geometry = new THREE.BoxGeometry(w, h, t);
         const material = new THREE.MeshLambertMaterial({
@@ -140,7 +143,7 @@ export class GCodeViewer {
         else if (pos === 'top-left') { shiftX = w/2; shiftY = -h/2; }
         else if (pos === 'top-right') { shiftX = -w/2; shiftY = -h/2; }
 
-        this.stockMesh.position.set(shiftX, shiftY, -t/2);
+        this.stockMesh.position.set(shiftX, shiftY, t/2);
         this.scene.add(this.stockMesh);
     }
 
@@ -155,8 +158,9 @@ export class GCodeViewer {
         
         this.animationPath = [];
         const lines = gcode.split('\n');
-        let cur = new THREE.Vector3(0, 0, 5);
-        this.animationPath.push({ pos: cur.clone(), type: 'start', dist: 0 });
+        // Initial pos at Safe Z relative to stock top + offset
+        let cur = new THREE.Vector3(0, 0, 5 + this.zOffset); 
+        this.animationPath.push({ pos: cur.clone(), type: 'start', dist: 0, lineIndex: 0 });
 
         let currentType = 'G0';
         let pathPoints = [cur.clone()];
@@ -203,7 +207,10 @@ export class GCodeViewer {
                 const f = getVal('F');
                 if (f !== null) currentFeed = f;
                 
-                const x = getVal('X'); const y = getVal('Y'); const z = getVal('Z');
+                const x = getVal('X'); 
+                const y = getVal('Y'); 
+                let z = getVal('Z');
+                if (z !== null) z += this.zOffset; // Apply offset
                 
                 if (newType !== currentType && !isArc) {
                     commitPath(currentType);
@@ -270,9 +277,12 @@ export class GCodeViewer {
                 totalMinutes += moveTime;
                 
                 // Pass Time Logic (Cutting Only)
-                if (newType !== 'G0' && tz < 0.001) { // Assuming Z0 is top of stock
-                    // Group by Z level (rounded)
-                    const zKey = tz.toFixed(2);
+                // Use original Z depth logic relative to stock top?
+                // Cutting is usually below Z=0 (raw G-code).
+                // So if raw z (tz - offset) < 0.
+                if (newType !== 'G0' && (tz - this.zOffset) < 0.001) { 
+                    // Group by Z level (rounded raw Z)
+                    const zKey = (tz - this.zOffset).toFixed(2);
                     const t = layerTimes.get(zKey) || 0;
                     layerTimes.set(zKey, t + moveTime);
                 }
