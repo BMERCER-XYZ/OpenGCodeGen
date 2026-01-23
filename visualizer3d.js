@@ -108,7 +108,7 @@ export class GCodeViewer {
 
     update(gcode, params) {
         this.updateStock(params);
-        this.parseGCode(gcode);
+        return this.parseGCode(gcode, params);
     }
 
     updateStock(params) {
@@ -143,7 +143,7 @@ export class GCodeViewer {
         this.scene.add(this.stockMesh);
     }
 
-    parseGCode(gcode) {
+    parseGCode(gcode, params) {
         // Clear old
         while(this.toolpathGroup.children.length > 0){
             const c = this.toolpathGroup.children[0];
@@ -159,6 +159,13 @@ export class GCodeViewer {
 
         let currentType = 'G0';
         let pathPoints = [cur.clone()];
+        
+        // Stats
+        let totalMinutes = 0;
+        let layerTimes = new Map(); // Z -> time
+        let currentFeed = params.feedRate || 800;
+        const rapidXY = params.rapidXY || 7000;
+        const rapidZ = params.rapidZ || 500;
 
         const commitPath = (type) => {
             if (pathPoints.length < 2) return;
@@ -191,8 +198,9 @@ export class GCodeViewer {
                     return m ? parseFloat(m[1]) : null;
                 };
                 
-                // Get feedrate for animation speed?
-                // For now use defaults/overrides
+                // Update Feed
+                const f = getVal('F');
+                if (f !== null) currentFeed = f;
                 
                 const x = getVal('X'); const y = getVal('Y'); const z = getVal('Z');
                 
@@ -206,6 +214,10 @@ export class GCodeViewer {
                 const ty = (y !== null) ? y : cur.y;
                 const tz = (z !== null) ? z : cur.z;
                 
+                // Calculate Time and Points
+                let dist = 0;
+                let moveTime = 0;
+                
                 if (isArc) {
                     const i = getVal('I') || 0; const j = getVal('J') || 0;
                     const cx = cur.x + i; const cy = cur.y + j;
@@ -215,6 +227,14 @@ export class GCodeViewer {
                     let diff = endA - startA;
                     if (arcDir === 3 && diff <= 0) diff += Math.PI * 2;
                     if (arcDir === 2 && diff >= 0) diff -= Math.PI * 2;
+                    
+                    // Arc Length
+                    // Helix? Z moves too?
+                    // Approx distance: ArcLength on XY + Z move?
+                    // d = sqrt( (r*theta)^2 + dz^2 )
+                    const arcLen = Math.abs(diff * r);
+                    const zLen = Math.abs(tz - cur.z);
+                    dist = Math.sqrt(arcLen*arcLen + zLen*zLen);
                     
                     const segs = 16;
                     for (let s = 1; s <= segs; s++) {
@@ -226,18 +246,34 @@ export class GCodeViewer {
                         const pVec = new THREE.Vector3(px, py, pz);
                         
                         pathPoints.push(pVec);
-                        // Add to animation path
                         const last = this.animationPath[this.animationPath.length-1];
-                        const d = last.pos.distanceTo(pVec);
-                        this.animationPath.push({ pos: pVec, type: newType, dist: d });
+                        const dSeg = last.pos.distanceTo(pVec);
+                        this.animationPath.push({ pos: pVec, type: newType, dist: dSeg });
                     }
                 } else {
                     const tVec = new THREE.Vector3(tx, ty, tz);
                     pathPoints.push(tVec);
-                    // Add to animation path
-                    const last = this.animationPath[this.animationPath.length-1];
-                    const d = last.pos.distanceTo(tVec);
-                    this.animationPath.push({ pos: tVec, type: newType, dist: d });
+                    dist = cur.distanceTo(tVec);
+                    this.animationPath.push({ pos: tVec, type: newType, dist: dist });
+                }
+                
+                // Calculate Speed
+                let speed = currentFeed;
+                if (newType === 'G0') {
+                    // Rapid
+                    const xyMove = (Math.abs(tx - cur.x) > 0.001 || Math.abs(ty - cur.y) > 0.001);
+                    speed = xyMove ? rapidXY : rapidZ;
+                }
+                
+                moveTime = dist / speed; // Minutes
+                totalMinutes += moveTime;
+                
+                // Pass Time Logic (Cutting Only)
+                if (newType !== 'G0' && tz < 0.001) { // Assuming Z0 is top of stock
+                    // Group by Z level (rounded)
+                    const zKey = tz.toFixed(2);
+                    const t = layerTimes.get(zKey) || 0;
+                    layerTimes.set(zKey, t + moveTime);
                 }
                 
                 cur.set(tx, ty, tz);
@@ -247,7 +283,18 @@ export class GCodeViewer {
         
         // Reset Simulation
         this.stop();
-        this.toolMesh.position.copy(this.animationPath[0].pos);
+        if(this.animationPath.length > 0)
+            this.toolMesh.position.copy(this.animationPath[0].pos);
+            
+        // Calculate Avg Pass Time
+        let avgPass = 0;
+        if (layerTimes.size > 0) {
+            let sum = 0;
+            layerTimes.forEach(v => sum += v);
+            avgPass = sum / layerTimes.size;
+        }
+        
+        return { totalTime: totalMinutes, avgPassTime: avgPass };
     }
 
     // Animation Control

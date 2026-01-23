@@ -357,11 +357,25 @@ function update() {
         getEl('gcodeOutput').value = code;
 
         drawPreview(params);
-        if (staticViewer) staticViewer.update(code, params);
-        if (simViewer) simViewer.update(code, params);
+    // Draw 3D
+    if (staticViewer) staticViewer.update(code, params);
+    if (simViewer) {
+        const stats = simViewer.update(code, params);
+        if (stats) {
+            getEl('estTotalTime').textContent = formatTime(stats.totalTime);
+            getEl('estPassTime').textContent = formatTime(stats.avgPassTime);
+        }
+    }
     } catch (e) {
         console.error("Update failed:", e);
     }
+}
+
+function formatTime(minutes) {
+    if (!minutes || minutes < 0) return "00:00";
+    const m = Math.floor(minutes);
+    const s = Math.floor((minutes - m) * 60);
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
 function drawPreview(params) {
