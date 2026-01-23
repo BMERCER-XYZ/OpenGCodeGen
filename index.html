@@ -66,6 +66,7 @@
             </li>
         </ul>
         <ul>
+            <li><button id="generateBtn" role="button">Generate G-Code</button></li>
             <li><a href="#" role="button" id="downloadBtn" class="secondary">Download .gcode</a></li>
         </ul>
     </nav>
@@ -137,6 +138,7 @@
                         <button class="tab-btn active" data-tab="view-2d">2D Preview</button>
                         <button class="tab-btn" data-tab="view-3d">3D Visualizer</button>
                         <button class="tab-btn" data-tab="view-sketch">Sketch</button>
+                        <button class="tab-btn" data-tab="view-sim">G-Code Preview</button>
                         <button class="tab-btn" data-tab="view-gcode">G-Code</button>
                     </nav>
 
@@ -174,6 +176,21 @@
                         <div class="canvas-container">
                             <canvas id="sketchCanvas" width="500" height="400"></canvas>
                         </div>
+                    </div>
+
+                    <div id="view-sim" class="tab-content">
+                        <div style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                            <button id="simStartBtn" class="outline small">|&lt;</button>
+                            <button id="simPlayBtn" class="outline small">&gt;</button>
+                            <button id="simPauseBtn" class="outline small">||</button>
+                            <button id="simEndBtn" class="outline small">&gt;|</button>
+                            <span style="border-left: 1px solid #ccc; height: 20px; margin: 0 5px;"></span>
+                            <small>Speed:</small>
+                            <button id="simSlowerBtn" class="outline small">-</button>
+                            <span id="simSpeedDisplay">1x</span>
+                            <button id="simFasterBtn" class="outline small">+</button>
+                        </div>
+                        <div id="sim-container" style="width: 100%; height: 400px; background: #000; overflow: hidden;"></div>
                     </div>
 
                     <div id="view-gcode" class="tab-content">

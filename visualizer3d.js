@@ -1,283 +1,323 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-let scene, camera, renderer, controls;
-let toolpathGroup, stockMesh, axesHelper;
-let container;
-let isInitialized = false;
-
 // Theme Colors
 const COLOR_STOCK = 0xdddddd;
-const COLOR_RAPID = 0xff0000; // Red
-const COLOR_FEED = 0x0000ff;  // Blue
+const COLOR_RAPID = 0xff0000;
+const COLOR_FEED = 0x0000ff;
 const COLOR_GRID = 0x888888;
-const COLOR_BG = 0x0b0b10; // Matches CSS
+const COLOR_BG = 0x0b0b10;
+const COLOR_TOOL = 0xffff00; // Yellow tool
 
-export function init3D(domContainer) {
-    container = domContainer;
-    
-    // Scene
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(COLOR_BG);
+export class GCodeViewer {
+    constructor(container) {
+        this.container = container;
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
+        this.controls = null;
+        this.toolpathGroup = null;
+        this.stockMesh = null;
+        this.toolMesh = null;
+        
+        // Animation State
+        this.isAnimating = false;
+        this.isPlaying = false;
+        this.animationPath = []; // Array of {pos: Vector3, type: G0/G1, dist: number}
+        this.currentIndex = 0;
+        this.progress = 0; // 0 to 1 along current segment
+        this.speedMultiplier = 1.0;
+        this.baseSpeed = 1000; // mm/min visual baseline
+        this.lastTime = 0;
 
-    // Camera
-    const aspect = container.clientWidth / container.clientHeight;
-    camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
-    camera.position.set(0, -100, 100); // Isometric-ish view
-    camera.up.set(0, 0, 1); // Z is up
-
-    // Renderer
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    container.appendChild(renderer.domElement);
-
-    // Controls
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.1;
-    controls.screenSpacePanning = true;
-
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
-    
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(50, -50, 100);
-    scene.add(dirLight);
-
-    // Initial Objects
-    toolpathGroup = new THREE.Group();
-    scene.add(toolpathGroup);
-
-    // Grid Helper (XY Plane)
-    const grid = new THREE.GridHelper(500, 50, COLOR_GRID, 0x444444);
-    grid.rotation.x = Math.PI / 2; // Rotate to lie on XY plane (Z-up)
-    scene.add(grid);
-
-    // Axes
-    axesHelper = new THREE.AxesHelper(20);
-    scene.add(axesHelper);
-
-    isInitialized = true;
-    animate();
-    
-    // Resize Listener
-    window.addEventListener('resize', onResize);
-}
-
-function onResize() {
-    if (!camera || !renderer || !container) return;
-    // Check if container is visible/has size
-    if (container.clientWidth === 0) return;
-    
-    camera.aspect = container.clientWidth / container.clientHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(container.clientWidth, container.clientHeight);
-}
-
-// Exported to allow manual trigger when tab becomes visible
-export function resize3D() {
-    onResize();
-}
-
-function animate() {
-    requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, camera);
-}
-
-export function update3D(gcode, params) {
-    if (!isInitialized) return;
-
-    // 1. Update Stock
-    updateStock(params);
-
-    // 2. Parse and Draw G-Code
-    drawToolpath(gcode);
-}
-
-function updateStock(params) {
-    if (stockMesh) scene.remove(stockMesh);
-
-    const w = params.stockWidth || 100;
-    const h = params.stockHeight || 100;
-    const t = params.stockThickness || 1; // Visual thickness if not set
-
-    const geometry = new THREE.BoxGeometry(w, h, t);
-    
-    // Transparent material
-    const material = new THREE.MeshLambertMaterial({
-        color: COLOR_STOCK,
-        transparent: true,
-        opacity: 0.3,
-        side: THREE.DoubleSide
-    });
-
-    stockMesh = new THREE.Mesh(geometry, material);
-    
-    // Position stock
-    // Params 'origin' determines where (0,0,0) is relative to stock
-    // Our visualizer keeps (0,0,0) at World Origin.
-    // So we need to shift the stock mesh so that World Origin matches the selected Job Origin.
-    
-    // Stock Center (local) is (0,0,0) of the mesh.
-    // If Job Origin is "stock-center", Stock Mesh Pos should be (0,0, -t/2). (Top surface at Z=0)
-    
-    let shiftX = 0;
-    let shiftY = 0;
-    const originVal = params.origin || 'stock-center';
-    
-    // If origin is "stock-bottom-left", it means (0,0) is at Bottom-Left.
-    // So Stock Center is at (+w/2, +h/2).
-    
-    // Parse Origin similar to ui.js logic
-    let pos = 'center';
-    if (originVal.startsWith('stock-')) pos = originVal.replace('stock-', '');
-    else if (originVal.startsWith('shape-')) pos = 'center'; // Simplify shape origin to center for stock viz for now, or assume stock centered on shape
-
-    if (pos === 'bottom-left') { shiftX = w/2; shiftY = h/2; }
-    else if (pos === 'bottom-right') { shiftX = -w/2; shiftY = h/2; }
-    else if (pos === 'top-left') { shiftX = w/2; shiftY = -h/2; }
-    else if (pos === 'top-right') { shiftX = -w/2; shiftY = -h/2; }
-    // center: shift = 0
-
-    stockMesh.position.set(shiftX, shiftY, -t/2); 
-    scene.add(stockMesh);
-}
-
-function drawToolpath(gcode) {
-    // Clear old lines
-    while(toolpathGroup.children.length > 0){
-        const child = toolpathGroup.children[0];
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) child.material.dispose();
-        toolpathGroup.remove(child); 
+        this.init();
     }
 
-    const lines = gcode.split('\n');
-    
-    let curX = 0, curY = 0, curZ = 5; // Start at Safe Z assumption
-    
-    let pathPoints = [];
-    let currentType = 'G0'; // G0 or G1
+    init() {
+        // Scene
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(COLOR_BG);
 
-    const commitPath = (type) => {
-        if (pathPoints.length < 2) return;
+        // Camera
+        const aspect = this.container.clientWidth / this.container.clientHeight;
+        this.camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
+        this.camera.position.set(0, -100, 100);
+        this.camera.up.set(0, 0, 1);
+
+        // Renderer
+        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+        this.container.appendChild(this.renderer.domElement);
+
+        // Controls
+        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.controls.enableDamping = true;
+        this.controls.dampingFactor = 0.1;
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        this.scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(50, -50, 100);
+        this.scene.add(dirLight);
+
+        // Groups
+        this.toolpathGroup = new THREE.Group();
+        this.scene.add(this.toolpathGroup);
+
+        // Helpers
+        const grid = new THREE.GridHelper(500, 50, COLOR_GRID, 0x444444);
+        grid.rotation.x = Math.PI / 2;
+        this.scene.add(grid);
+        const axes = new THREE.AxesHelper(20);
+        this.scene.add(axes);
+
+        // Tool Mesh (Cone)
+        const toolGeom = new THREE.ConeGeometry(2, 10, 16);
+        toolGeom.rotateX(-Math.PI / 2); // Rotate to point along -Z (down)
+        toolGeom.translate(0, 0, 5); // Shift so tip is at (0,0,0) and body extends to +Z
         
-        const geometry = new THREE.BufferGeometry().setFromPoints(pathPoints);
-        const material = new THREE.LineBasicMaterial({ 
-            color: type === 'G0' ? COLOR_RAPID : COLOR_FEED,
-            opacity: type === 'G0' ? 0.5 : 1.0,
-            transparent: type === 'G0'
+        const toolMat = new THREE.MeshLambertMaterial({ color: COLOR_TOOL });
+        this.toolMesh = new THREE.Mesh(toolGeom, toolMat);
+        this.toolMesh.visible = false;
+        this.scene.add(this.toolMesh);
+
+        // Loop
+        this.animateLoop();
+    }
+
+    animateLoop(time) {
+        requestAnimationFrame((t) => this.animateLoop(t));
+        
+        if (this.isPlaying) {
+            const dt = (time - this.lastTime) / 1000; // Seconds
+            this.updateAnimation(dt);
+        }
+        this.lastTime = time;
+
+        this.controls.update();
+        this.renderer.render(this.scene, this.camera);
+    }
+
+    resize() {
+        if (!this.container || this.container.clientWidth === 0) return;
+        this.camera.aspect = this.container.clientWidth / this.container.clientHeight;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+    }
+
+    update(gcode, params) {
+        this.updateStock(params);
+        this.parseGCode(gcode);
+    }
+
+    updateStock(params) {
+        if (this.stockMesh) this.scene.remove(this.stockMesh);
+
+        const w = params.stockWidth || 100;
+        const h = params.stockHeight || 100;
+        const t = params.stockThickness || 1;
+
+        const geometry = new THREE.BoxGeometry(w, h, t);
+        const material = new THREE.MeshLambertMaterial({
+            color: COLOR_STOCK,
+            transparent: true,
+            opacity: 0.3,
+            side: THREE.DoubleSide
         });
-        const line = new THREE.Line(geometry, material);
-        toolpathGroup.add(line);
-    };
 
-    pathPoints.push(new THREE.Vector3(curX, curY, curZ));
+        this.stockMesh = new THREE.Mesh(geometry, material);
+        
+        // Origin logic
+        let shiftX = 0, shiftY = 0;
+        const originVal = params.origin || 'stock-center';
+        let pos = 'center';
+        if (originVal.startsWith('stock-')) pos = originVal.replace('stock-', '');
+        
+        if (pos === 'bottom-left') { shiftX = w/2; shiftY = h/2; }
+        else if (pos === 'bottom-right') { shiftX = -w/2; shiftY = h/2; }
+        else if (pos === 'top-left') { shiftX = w/2; shiftY = -h/2; }
+        else if (pos === 'top-right') { shiftX = -w/2; shiftY = -h/2; }
 
-    lines.forEach(line => {
-        line = line.trim().toUpperCase();
-        // Remove comments
-        if (line.includes(';')) line = line.split(';')[0].trim();
-        if (!line) return;
+        this.stockMesh.position.set(shiftX, shiftY, -t/2);
+        this.scene.add(this.stockMesh);
+    }
 
-        // Detect Command
-        let isMove = false;
-        let newType = currentType;
-        let isArc = false;
-        let arcDir = 0; // 2=CW, 3=CCW
-
-        if (line.startsWith('G0') || line.startsWith('G00')) {
-            newType = 'G0';
-            isMove = true;
-        } else if (line.startsWith('G1') || line.startsWith('G01')) {
-            newType = 'G1';
-            isMove = true;
-        } else if (line.startsWith('G2') || line.startsWith('G02')) {
-            newType = 'G1';
-            isMove = true;
-            isArc = true;
-            arcDir = 2; // Treat arc as feed
-        } else if (line.startsWith('G3') || line.startsWith('G03')) {
-            newType = 'G1';
-            isMove = true;
-            isArc = true;
-            arcDir = 3;
+    parseGCode(gcode) {
+        // Clear old
+        while(this.toolpathGroup.children.length > 0){
+            const c = this.toolpathGroup.children[0];
+            if(c.geometry) c.geometry.dispose();
+            if(c.material) c.material.dispose();
+            this.toolpathGroup.remove(c);
         }
+        
+        this.animationPath = [];
+        const lines = gcode.split('\n');
+        let cur = new THREE.Vector3(0, 0, 5);
+        this.animationPath.push({ pos: cur.clone(), type: 'start', dist: 0 });
 
-        if (isMove) {
-            // Parse Coords
-            const getVal = (char) => {
-                const regex = new RegExp(char + '([-0-9.]+)');
-                const match = line.match(regex);
-                return match ? parseFloat(match[1]) : null;
-            };
+        let currentType = 'G0';
+        let pathPoints = [cur.clone()];
 
-            const x = getVal('X');
-            const y = getVal('Y');
-            const z = getVal('Z');
-            
-            // Check if type changed
-            if (newType !== currentType && !isArc) {
-                commitPath(currentType);
-                pathPoints = [new THREE.Vector3(curX, curY, curZ)]; // Start new path from current
-                currentType = newType;
-            }
+        const commitPath = (type) => {
+            if (pathPoints.length < 2) return;
+            const geo = new THREE.BufferGeometry().setFromPoints(pathPoints);
+            const mat = new THREE.LineBasicMaterial({
+                color: type === 'G0' ? COLOR_RAPID : COLOR_FEED,
+                opacity: type === 'G0' ? 0.5 : 1.0,
+                transparent: type === 'G0'
+            });
+            this.toolpathGroup.add(new THREE.Line(geo, mat));
+        };
 
-            const targetX = (x !== null) ? x : curX;
-            const targetY = (y !== null) ? y : curY;
-            const targetZ = (z !== null) ? z : curZ;
+        lines.forEach(line => {
+            line = line.trim().toUpperCase().split(';')[0];
+            if (!line) return;
 
-            if (isArc) {
-                // Approximate Arc
-                // Need I, J
-                const i = getVal('I') || 0;
-                const j = getVal('J') || 0;
+            let isMove = false;
+            let newType = currentType;
+            let isArc = false;
+            let arcDir = 0;
+
+            if (line.startsWith('G0') || line.startsWith('G00')) { newType = 'G0'; isMove = true; }
+            else if (line.startsWith('G1') || line.startsWith('G01')) { newType = 'G1'; isMove = true; }
+            else if (line.startsWith('G2') || line.startsWith('G02')) { newType = 'G1'; isMove = true; isArc = true; arcDir = 2; }
+            else if (line.startsWith('G3') || line.startsWith('G03')) { newType = 'G1'; isMove = true; isArc = true; arcDir = 3; }
+
+            if (isMove) {
+                const getVal = (c) => {
+                    const m = line.match(new RegExp(c + '([-0-9.]+)'));
+                    return m ? parseFloat(m[1]) : null;
+                };
                 
-                // Center relative to start (curX, curY)
-                const centerX = curX + i;
-                const centerY = curY + j;
+                // Get feedrate for animation speed?
+                // For now use defaults/overrides
                 
-                // Radius
-                const radius = Math.sqrt(i*i + j*j);
+                const x = getVal('X'); const y = getVal('Y'); const z = getVal('Z');
                 
-                // Angles
-                const startAngle = Math.atan2(curY - centerY, curX - centerX);
-                const endAngle = Math.atan2(targetY - centerY, targetX - centerX);
+                if (newType !== currentType && !isArc) {
+                    commitPath(currentType);
+                    pathPoints = [cur.clone()];
+                    currentType = newType;
+                }
+
+                const tx = (x !== null) ? x : cur.x;
+                const ty = (y !== null) ? y : cur.y;
+                const tz = (z !== null) ? z : cur.z;
                 
-                // Calculate angular span
-                let diff = endAngle - startAngle;
-                
-                // Handle direction and wrap
-                if (arcDir === 3) { // CCW (G3)
-                    if (diff <= 0) diff += Math.PI * 2;
-                } else { // CW (G2)
-                    if (diff >= 0) diff -= Math.PI * 2;
+                if (isArc) {
+                    const i = getVal('I') || 0; const j = getVal('J') || 0;
+                    const cx = cur.x + i; const cy = cur.y + j;
+                    const r = Math.sqrt(i*i + j*j);
+                    const startA = Math.atan2(cur.y - cy, cur.x - cx);
+                    const endA = Math.atan2(ty - cy, tx - cx);
+                    let diff = endA - startA;
+                    if (arcDir === 3 && diff <= 0) diff += Math.PI * 2;
+                    if (arcDir === 2 && diff >= 0) diff -= Math.PI * 2;
+                    
+                    const segs = 16;
+                    for (let s = 1; s <= segs; s++) {
+                        const t = s / segs;
+                        const theta = startA + diff * t;
+                        const px = cx + r * Math.cos(theta);
+                        const py = cy + r * Math.sin(theta);
+                        const pz = cur.z + (tz - cur.z) * t;
+                        const pVec = new THREE.Vector3(px, py, pz);
+                        
+                        pathPoints.push(pVec);
+                        // Add to animation path
+                        const last = this.animationPath[this.animationPath.length-1];
+                        const d = last.pos.distanceTo(pVec);
+                        this.animationPath.push({ pos: pVec, type: newType, dist: d });
+                    }
+                } else {
+                    const tVec = new THREE.Vector3(tx, ty, tz);
+                    pathPoints.push(tVec);
+                    // Add to animation path
+                    const last = this.animationPath[this.animationPath.length-1];
+                    const d = last.pos.distanceTo(tVec);
+                    this.animationPath.push({ pos: tVec, type: newType, dist: d });
                 }
                 
-                // Segments
-                const segments = 16;
-                for (let s = 1; s <= segments; s++) {
-                    const t = s / segments;
-                    const theta = startAngle + diff * t;
-                    const px = centerX + radius * Math.cos(theta);
-                    const py = centerY + radius * Math.sin(theta);
-                    // Interpolate Z (Spiral)
-                    const pz = curZ + (targetZ - curZ) * t;
-                    pathPoints.push(new THREE.Vector3(px, py, pz));
-                }
-            } else {
-                // Linear
-                pathPoints.push(new THREE.Vector3(targetX, targetY, targetZ));
+                cur.set(tx, ty, tz);
             }
+        });
+        commitPath(currentType);
+        
+        // Reset Simulation
+        this.stop();
+        this.toolMesh.position.copy(this.animationPath[0].pos);
+    }
 
-            curX = targetX;
-            curY = targetY;
-            curZ = targetZ;
+    // Animation Control
+    play() {
+        this.isPlaying = true;
+        this.toolMesh.visible = true;
+    }
+    pause() {
+        this.isPlaying = false;
+    }
+    stop() {
+        this.isPlaying = false;
+        this.currentIndex = 0;
+        this.progress = 0;
+        if(this.animationPath.length > 0)
+            this.toolMesh.position.copy(this.animationPath[0].pos);
+    }
+    skipEnd() {
+        this.isPlaying = false;
+        this.currentIndex = this.animationPath.length - 2; // End
+        this.progress = 1;
+        this.updateToolPos();
+    }
+    setSpeed(mult) {
+        this.speedMultiplier = mult;
+    }
+
+    updateAnimation(dt) {
+        if (this.currentIndex >= this.animationPath.length - 1) {
+            this.pause();
+            return;
         }
-    });
 
-    // Commit final path
-    commitPath(currentType);
+        const startNode = this.animationPath[this.currentIndex];
+        const endNode = this.animationPath[this.currentIndex + 1];
+        
+        // Calculate move speed (mm/sec)
+        // Visual speed: 1000mm/min = 16.6 mm/sec
+        // Apply multiplier
+        let speed = (this.baseSpeed / 60) * this.speedMultiplier;
+        
+        // Rapids are faster?
+        if (endNode.type === 'G0') speed *= 5;
+
+        // Distance to cover this frame
+        const distToCover = speed * dt;
+        const segmentDist = endNode.dist;
+        
+        // Convert to progress increment
+        const progressInc = distToCover / segmentDist;
+        
+        this.progress += progressInc;
+
+        if (this.progress >= 1) {
+            this.progress = 0;
+            this.currentIndex++;
+            // Check overflow
+            if (this.currentIndex >= this.animationPath.length - 1) {
+                this.pause();
+                return;
+            }
+        }
+        
+        this.updateToolPos();
+    }
+
+    updateToolPos() {
+        if (this.currentIndex >= this.animationPath.length - 1) return;
+        const p1 = this.animationPath[this.currentIndex].pos;
+        const p2 = this.animationPath[this.currentIndex + 1].pos;
+        this.toolMesh.position.lerpVectors(p1, p2, this.progress);
+    }
 }

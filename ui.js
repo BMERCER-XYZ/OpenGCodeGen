@@ -1,9 +1,11 @@
 import { GCodeGenerator } from './generator.js';
-import { init3D, update3D, resize3D } from './visualizer3d.js';
+import { GCodeViewer } from './visualizer3d.js';
 import { Sketcher } from './sketcher.js';
 
 const generator = new GCodeGenerator();
-let sketcher; // Instance
+let sketcher; 
+let staticViewer, simViewer;
+let simSpeed = 1.0;
 
 // DOM Elements
 const shapeSelect = document.getElementById('shapeSelect');
@@ -29,6 +31,15 @@ const gridIncBtn = document.getElementById('gridIncBtn');
 const gridDecBtn = document.getElementById('gridDecBtn');
 const gridSizeDisplay = document.getElementById('gridSizeDisplay');
 
+// Simulation Controls
+const simStartBtn = document.getElementById('simStartBtn');
+const simPlayBtn = document.getElementById('simPlayBtn');
+const simPauseBtn = document.getElementById('simPauseBtn');
+const simEndBtn = document.getElementById('simEndBtn');
+const simSlowerBtn = document.getElementById('simSlowerBtn');
+const simFasterBtn = document.getElementById('simFasterBtn');
+const simSpeedDisplay = document.getElementById('simSpeedDisplay');
+
 // Tab DOM Elements
 const enableTabsCheckbox = document.getElementById('enableTabs');
 const tabWidthInput = document.getElementById('tabWidth');
@@ -39,6 +50,7 @@ const addTabBtn = document.getElementById('addTabBtn');
 
 // View Tabs
 const threeContainer = document.getElementById('three-container');
+const simContainer = document.getElementById('sim-container');
 const tabButtons = document.querySelectorAll('.tab-btn');
 const tabContents = document.querySelectorAll('.tab-content');
 
@@ -70,12 +82,13 @@ function init() {
     attachListeners();
     setupTabs();
     
-    // Init 3D Scene
-    init3D(threeContainer);
+    // Init Viewers
+    staticViewer = new GCodeViewer(threeContainer);
+    simViewer = new GCodeViewer(simContainer);
     
     // Init Sketcher
     sketcher = new Sketcher('sketchCanvas');
-    sketcher.onUpdate(update);
+    // sketcher.onUpdate(update); // Removed for manual generation
     
     update();
 }
@@ -98,9 +111,12 @@ function switchTab(targetId) {
         else c.classList.remove('active');
     });
     
-    // Trigger 3D Resize if needed
+    // Trigger Resize
     if (targetId === 'view-3d') {
-        setTimeout(() => resize3D(), 50);
+        setTimeout(() => staticViewer.resize(), 50);
+    }
+    if (targetId === 'view-sim') {
+        setTimeout(() => simViewer.resize(), 50);
     }
 }
 
@@ -123,14 +139,11 @@ function renderDimensions(shape) {
         `;
         dimensionInputs.appendChild(div);
     });
-    
-    // Re-attach listeners to new inputs
-    dimensionInputs.querySelectorAll('input').forEach(input => {
-        input.addEventListener('input', update);
-    });
 }
 
 function attachListeners() {
+    generateBtn.addEventListener('click', update);
+
     shapeSelect.addEventListener('change', (e) => {
         const newShape = e.target.value;
         
@@ -151,16 +164,11 @@ function attachListeners() {
         if (newShape === 'sketch') {
             switchTab('view-sketch');
         }
-        
-        update();
     });
     
-    originSelect.addEventListener('change', update);
+    // originSelect listener removed (auto-update)
 
-    inputs.forEach(id => {
-        const el = document.getElementById(id);
-        if(el) el.addEventListener('input', update);
-    });
+    // inputs listener removed (auto-update)
     
     clearSketchBtn.addEventListener('click', () => {
         sketcher.clear();
@@ -178,19 +186,35 @@ function attachListeners() {
         const s = sketcher.changeGrid(-5);
         gridSizeDisplay.textContent = s + 'mm';
     });
+    
+    // Sim Controls
+    simStartBtn.addEventListener('click', () => simViewer.stop());
+    simPlayBtn.addEventListener('click', () => simViewer.play());
+    simPauseBtn.addEventListener('click', () => simViewer.pause());
+    simEndBtn.addEventListener('click', () => simViewer.skipEnd());
+    
+    simSlowerBtn.addEventListener('click', () => {
+        if (simSpeed > 0.1) simSpeed -= 0.1;
+        simSpeedDisplay.textContent = simSpeed.toFixed(1) + 'x';
+        simViewer.setSpeed(simSpeed);
+    });
+    
+    simFasterBtn.addEventListener('click', () => {
+        simSpeed += 0.1;
+        simSpeedDisplay.textContent = simSpeed.toFixed(1) + 'x';
+        simViewer.setSpeed(simSpeed);
+    });
 
     enableRapidCheckbox.addEventListener('change', (e) => {
         const enabled = e.target.checked;
         rapidXYInput.disabled = !enabled;
         rapidZInput.disabled = !enabled;
-        update();
     });
 
     stockThicknessInput.addEventListener('input', (e) => {
         const val = e.target.value;
         if (val) {
             targetDepthInput.value = val;
-            update(); // Trigger update with new depth
         }
     });
     
@@ -200,7 +224,6 @@ function attachListeners() {
         tabWidthInput.disabled = !enabled;
         tabThicknessInput.disabled = !enabled;
         tabContainer.style.display = enabled ? 'block' : 'none';
-        update();
     });
 
     addTabBtn.addEventListener('click', addTab);
@@ -218,18 +241,15 @@ function addTab() {
         tabs.push({ side: 'bottom', offset: 50 }); // 50%
     }
     renderTabs();
-    update();
 }
 
 function removeTab(index) {
     tabs.splice(index, 1);
     renderTabs();
-    update();
 }
 
 function updateTab(index, key, value) {
     tabs[index][key] = value;
-    update();
 }
 
 function renderTabs() {
@@ -371,7 +391,8 @@ function update() {
     drawPreview(params);
     
     // Draw 3D
-    update3D(code, params);
+    if (staticViewer) staticViewer.update(code, params);
+    if (simViewer) simViewer.update(code, params);
 }
 
 function drawPreview(params) {
