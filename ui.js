@@ -5,6 +5,7 @@ import { Sketcher } from './sketcher.js';
 const generator = new GCodeGenerator();
 let sketcher, staticViewer, simViewer;
 let simSpeed = 1.0;
+let lineOffsets = []; // Store start/end indices
 
 // State
 let tabs = [];
@@ -40,6 +41,7 @@ function init() {
         
         if(getEl('sim-container')) {
             simViewer = new GCodeViewer(getEl('sim-container'));
+            simViewer.onProgress(highlightLine);
         }
 
         renderDimensions('square'); 
@@ -352,18 +354,53 @@ function update() {
         
         const code = generator.generate();
         getEl('gcodeOutput').value = code;
+        
+        // Calculate Line Offsets for Highlighting
+        lineOffsets = [];
+        let cursor = 0;
+        const lines = code.split('\n');
+        lines.forEach(line => {
+            lineOffsets.push({ start: cursor, end: cursor + line.length });
+            cursor += line.length + 1; // +1 for \n
+        });
 
         drawPreview(params);
-        if (staticViewer) staticViewer.update(code, params);
-        if (simViewer) {
-            const stats = simViewer.update(code, params);
-            if (stats) {
-                getEl('estTotalTime').textContent = formatTime(stats.totalTime);
-                getEl('estPassTime').textContent = formatTime(stats.avgPassTime);
-            }
+    // Draw 3D
+    if (staticViewer) staticViewer.update(code, params);
+    if (simViewer) {
+        const stats = simViewer.update(code, params);
+        if (stats) {
+            getEl('estTotalTime').textContent = formatTime(stats.totalTime);
+            getEl('estPassTime').textContent = formatTime(stats.avgPassTime);
         }
+    }
     } catch (e) {
         console.error("Update failed:", e);
+    }
+}
+
+function highlightLine(index) {
+    const textarea = getEl('gcodeOutput');
+    if (!textarea || !lineOffsets[index]) return;
+    
+    const range = lineOffsets[index];
+    
+    // Focus needed for selection visualization in some browsers, 
+    // but might jump scroll. Textarea is readonly.
+    textarea.focus({preventScroll: true});
+    textarea.setSelectionRange(range.start, range.end);
+    
+    // Auto-Scroll
+    // Simple estimation: line height approx 1.2em ~ 15-20px depending on font.
+    // Let's try to center the line.
+    const totalLines = lineOffsets.length;
+    if (totalLines > 0) {
+        const percent = index / totalLines;
+        // textarea.scrollTop = (textarea.scrollHeight - textarea.clientHeight) * percent; 
+        // Better:
+        const lineHeight = 15; // approximate for monospace 0.85rem
+        const scrollPos = (index * lineHeight) - (textarea.clientHeight / 2);
+        textarea.scrollTop = scrollPos;
     }
 }
 

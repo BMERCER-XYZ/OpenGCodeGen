@@ -29,6 +29,7 @@ export class GCodeViewer {
         this.speedMultiplier = 1.0;
         this.baseSpeed = 1000; // mm/min visual baseline
         this.lastTime = 0;
+        this.progressCallback = null;
 
         this.init();
     }
@@ -178,8 +179,8 @@ export class GCodeViewer {
             this.toolpathGroup.add(new THREE.Line(geo, mat));
         };
 
-        lines.forEach(line => {
-            line = line.trim().toUpperCase().split(';')[0];
+        lines.forEach((lineRaw, lineIdx) => {
+            let line = lineRaw.trim().toUpperCase().split(';')[0];
             if (!line) return;
 
             let isMove = false;
@@ -248,13 +249,13 @@ export class GCodeViewer {
                         pathPoints.push(pVec);
                         const last = this.animationPath[this.animationPath.length-1];
                         const dSeg = last.pos.distanceTo(pVec);
-                        this.animationPath.push({ pos: pVec, type: newType, dist: dSeg });
+                        this.animationPath.push({ pos: pVec, type: newType, dist: dSeg, lineIndex: lineIdx });
                     }
                 } else {
                     const tVec = new THREE.Vector3(tx, ty, tz);
                     pathPoints.push(tVec);
                     dist = cur.distanceTo(tVec);
-                    this.animationPath.push({ pos: tVec, type: newType, dist: dist });
+                    this.animationPath.push({ pos: tVec, type: newType, dist: dist, lineIndex: lineIdx });
                 }
                 
                 // Calculate Speed
@@ -297,6 +298,10 @@ export class GCodeViewer {
         return { totalTime: totalMinutes, avgPassTime: avgPass };
     }
 
+    onProgress(cb) {
+        this.progressCallback = cb;
+    }
+
     // Animation Control
     play() {
         this.isPlaying = true;
@@ -311,6 +316,7 @@ export class GCodeViewer {
         this.progress = 0;
         if(this.animationPath.length > 0)
             this.toolMesh.position.copy(this.animationPath[0].pos);
+        if (this.progressCallback) this.progressCallback(0);
     }
     skipEnd() {
         this.isPlaying = false;
@@ -355,6 +361,11 @@ export class GCodeViewer {
             if (this.currentIndex >= this.animationPath.length - 1) {
                 this.pause();
                 return;
+            }
+            // Notify Progress
+            if (this.progressCallback) {
+                const idx = this.animationPath[this.currentIndex].lineIndex;
+                if (idx !== undefined) this.progressCallback(idx);
             }
         }
         
