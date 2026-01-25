@@ -135,49 +135,13 @@
             <section id="preview-area">
                 <article>
                     <nav class="tab-nav">
-                        <button class="tab-btn active" data-tab="view-2d">2D Preview</button>
+                        <button class="tab-btn active" data-tab="view-combined">G-Code</button>
                         <button class="tab-btn" data-tab="view-3d">3D Visualizer</button>
+                        <button class="tab-btn" data-tab="view-2d">2D Preview</button>
                         <button class="tab-btn" data-tab="view-sketch">Sketch</button>
-                        <button class="tab-btn" data-tab="view-combined">G-Code</button>
                     </nav>
 
-                    <div id="view-2d" class="tab-content active">
-                        <div class="canvas-container">
-                            <canvas id="previewCanvas" width="500" height="400"></canvas>
-                        </div>
-                        <footer>
-                            <small>Grid: 10mm spacing. Origin (0,0) is center of canvas.</small>
-                        </footer>
-                    </div>
-
-                    <div id="view-3d" class="tab-content">
-                        <div id="three-container"></div>
-                        <footer>
-                            <small>Left Click: Rotate | Right Click: Pan | Scroll: Zoom</small>
-                        </footer>
-                    </div>
-
-                    <div id="view-sketch" class="tab-content">
-                        <div style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-                            <button id="clearSketchBtn" class="outline small secondary">Clear</button>
-                            <span style="border-left: 1px solid #ccc; height: 20px; margin: 0 5px;"></span>
-                            <small>Zoom:</small>
-                            <button id="zoomInBtn" class="outline small">+</button>
-                            <button id="zoomOutBtn" class="outline small">-</button>
-                            <span style="border-left: 1px solid #ccc; height: 20px; margin: 0 5px;"></span>
-                            <small>Grid:</small>
-                            <button id="gridIncBtn" class="outline small">+</button>
-                            <span id="gridSizeDisplay">10mm</span>
-                            <button id="gridDecBtn" class="outline small">-</button>
-                            
-                            <small style="margin-left: auto;">Click start to close.</small>
-                        </div>
-                        <div class="canvas-container">
-                            <canvas id="sketchCanvas" width="500" height="400"></canvas>
-                        </div>
-                    </div>
-
-                    <div id="view-combined" class="tab-content">
+                    <div id="view-combined" class="tab-content active">
                         <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1rem;">
                             <!-- Left: Simulation -->
                             <div>
@@ -207,6 +171,42 @@
                                 <label for="gcodeOutput">Generated Output</label>
                                 <textarea id="gcodeOutput" style="flex-grow: 1; min-height: 400px; font-family: monospace; font-size: 0.85rem;" readonly></textarea>
                             </div>
+                        </div>
+                    </div>
+
+                    <div id="view-3d" class="tab-content">
+                        <div id="three-container"></div>
+                        <footer>
+                            <small>Left Click: Rotate | Right Click: Pan | Scroll: Zoom</small>
+                        </footer>
+                    </div>
+
+                    <div id="view-2d" class="tab-content">
+                        <div class="canvas-container">
+                            <canvas id="previewCanvas" width="500" height="400"></canvas>
+                        </div>
+                        <footer>
+                            <small>Grid: 10mm spacing. Origin (0,0) is center of canvas.</small>
+                        </footer>
+                    </div>
+
+                    <div id="view-sketch" class="tab-content">
+                        <div style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                            <button id="clearSketchBtn" class="outline small secondary">Clear</button>
+                            <span style="border-left: 1px solid #ccc; height: 20px; margin: 0 5px;"></span>
+                            <small>Zoom:</small>
+                            <button id="zoomInBtn" class="outline small">+</button>
+                            <button id="zoomOutBtn" class="outline small">-</button>
+                            <span style="border-left: 1px solid #ccc; height: 20px; margin: 0 5px;"></span>
+                            <small>Grid:</small>
+                            <button id="gridIncBtn" class="outline small">+</button>
+                            <span id="gridSizeDisplay">10mm</span>
+                            <button id="gridDecBtn" class="outline small">-</button>
+                            
+                            <small style="margin-left: auto;">Click start to close.</small>
+                        </div>
+                        <div class="canvas-container">
+                            <canvas id="sketchCanvas" width="500" height="400"></canvas>
                         </div>
                     </div>
                 </article>
@@ -312,9 +312,56 @@
                                 <option value="center">On Line (Trace)</option>
                             </select>
                         </label>
+                        
+                        <hr>
+                        
+                        <label>
+                            Lead-in/Out Type
+                            <select id="leadType">
+                                <option value="none">None</option>
+                                <option value="linear">Linear (Tangent)</option>
+                                <option value="radius">Radius (Arc)</option>
+                            </select>
+                        </label>
+
+                        <div class="grid">
+                            <label>
+                                Lead-in Length (mm)
+                                <input type="number" id="leadInLen" value="0.0" step="1.0">
+                            </label>
+                            <label>
+                                Lead-out Length (mm)
+                                <input type="number" id="leadOutLen" value="0.0" step="1.0">
+                            </label>
+                        </div>
+
+                        <hr>
+                        
+                        <label>
+                            <input type="checkbox" id="enableRoughing">
+                            Enable Roughing Passes
+                        </label>
+                        <div class="grid">
+                            <label>
+                                Roughing Stepover (mm)
+                                <input type="number" id="roughingStepover" value="1.0" step="0.1" disabled>
+                            </label>
+                            <label>
+                                Number of Passes
+                                <input type="number" id="roughingPasses" value="1" step="1" disabled>
+                            </label>
+                        </div>
                     </div>
 
                     <div id="facingConfig" class="grid">
+                        <label>
+                            Direction
+                            <select id="facingDirection">
+                                <option value="both">Both Ways</option>
+                                <option value="climb">Climb</option>
+                                <option value="conventional">Conventional</option>
+                            </select>
+                        </label>
                         <label>
                             Stepover (mm)
                             <input type="number" id="stepover" value="1.5" step="0.1">

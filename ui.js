@@ -137,6 +137,25 @@ function attachListeners() {
     const opType = getEl('opType');
     if (opType) opType.addEventListener('change', updateUIState);
 
+    // Lead Type Listener
+    const leadType = getEl('leadType');
+    if (leadType) {
+        leadType.addEventListener('change', (e) => {
+            const enabled = e.target.value !== 'none';
+            getEl('leadInLen').disabled = !enabled;
+            getEl('leadOutLen').disabled = !enabled;
+        });
+    }
+
+    const roughCheck = getEl('enableRoughing');
+    if (roughCheck) {
+        roughCheck.addEventListener('change', (e) => {
+            const enabled = e.target.checked;
+            getEl('roughingStepover').disabled = !enabled;
+            getEl('roughingPasses').disabled = !enabled;
+        });
+    }
+
     // Sketch Controls
     const clearBtn = getEl('clearSketchBtn');
     if (clearBtn) clearBtn.addEventListener('click', () => sketcher.clear());
@@ -293,6 +312,13 @@ function getParams() {
         toolDiameter: getNum('toolDiameter'),
         operation: getEl('operation').value,
         opType: opTypeSelect ? opTypeSelect.value : 'contour',
+        leadType: getEl('leadType') ? getEl('leadType').value : 'none',
+        leadInLen: getNum('leadInLen'),
+        leadOutLen: getNum('leadOutLen'),
+        enableRoughing: getEl('enableRoughing') ? getEl('enableRoughing').checked : false,
+        roughingStepover: getNum('roughingStepover'),
+        roughingPasses: getNum('roughingPasses'),
+        facingDirection: getEl('facingDirection') ? getEl('facingDirection').value : 'both',
         stepover: getNum('stepover'),
         passExtX: getNum('passExtX'),
         passExtY: getNum('passExtY'),

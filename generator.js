@@ -49,15 +49,65 @@ export class GCodeGenerator {
                 
                 lines.push(`; Pass at Z=${currentZ.toFixed(2)}`);
                 
-                // Move to start position (Rapid)
-                const startPos = this.getStartPosition(p.shape, offset);
-                lines.push(this.getRapidXY(startPos.x, startPos.y));
+                // Determine Offsets List (Roughing -> Finish)
+                const passOffsets = [];
                 
-                // Plunge
-                lines.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`); // Plunge at half feed usually safer
+                if (p.enableRoughing && p.roughingPasses > 0 && p.roughingStepover > 0) {
+                    // Direction Multiplier:
+                    // Outside (Cut Out): Roughing passes are larger. Offset increases. (+1)
+                    // Inside (Hole): Roughing passes are smaller. Offset decreases (more negative). (-1)
+                    // Center (Trace): Roughing? Maybe Stepover to Left/Right? 
+                    // Let's assume standard offset logic: Outside (+), Inside (-).
+                    
+                    let dirMult = 0;
+                    if (p.operation === 'outside') dirMult = 1;
+                    else if (p.operation === 'inside') dirMult = -1;
+                    
+                    if (dirMult !== 0) {
+                        for (let i = p.roughingPasses; i >= 1; i--) {
+                            passOffsets.push(offset + (i * p.roughingStepover * dirMult));
+                        }
+                    }
+                }
                 
-                // Cut Path
-                lines.push(...this.getShapePath(p.shape, offset, p.feedRate, currentZ));
+                // Add Final Finish Pass
+                passOffsets.push(offset);
+                
+                // Execute Passes
+                passOffsets.forEach((currentOffset, idx) => {
+                    const isFinish = idx === passOffsets.length - 1;
+                    const passName = isFinish ? 'Finish' : `Roughing ${p.roughingPasses - idx}`;
+                    lines.push(`; ${passName} Pass`);
+                    
+                    // Calculate Start & Leads
+                    const startPos = this.getStartPosition(p.shape, currentOffset);
+                    const leadIn = this.getLeadIn(p.shape, startPos, currentOffset, p);
+                    const leadOut = this.getLeadOut(p.shape, startPos, currentOffset, p);
+                    
+                    // Move to Start (Lead Start or Shape Start)
+                    const moveStart = leadIn ? leadIn.start : startPos;
+                    
+                    lines.push(this.getRapidXY(moveStart.x, moveStart.y));
+                    
+                    // Plunge
+                    lines.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`); 
+                    
+                    // Lead In
+                    if (leadIn && leadIn.moves) lines.push(...leadIn.moves);
+                    
+                    // Cut Path
+                    lines.push(...this.getShapePath(p.shape, currentOffset, p.feedRate, currentZ));
+                    
+                    // Lead Out
+                    if (leadOut && leadOut.moves) lines.push(...leadOut.moves);
+                    
+                    // Retract slightly if roughing to avoid dragging?
+                    // Or just Rapid XY to next start? 
+                    // Usually safer to lift if multiple passes at same Z.
+                    if (!isFinish) {
+                         lines.push(this.getRapidZ(p.safeZ));
+                    }
+                });
             }
         }
 
@@ -104,49 +154,346 @@ export class GCodeGenerator {
             
             lines.push(`; Facing Pass at Z=${currentZ.toFixed(2)}`);
             
-            let y = startY;
-            let direction = 1; // 1 = Left to Right, -1 = Right to Left
+            // Direction Logic
+            // Both: Alternate
+            // Climb: Always Left->Right (Start->End) ? Assuming Step Y+
+            // Conventional: Always Right->Left (End->Start) ? Assuming Step Y+
             
-            // Move to Start of this level
-            lines.push(this.getRapidXY(startX + t.x, y + t.y));
+            // Existing logic defined startX (Left) and endX (Right).
+            // startY (Bottom) to endY (Top).
+            
+            let y = startY;
+            
+            // For 'climb' or 'conventional', we enforce direction.
+            // For 'both', we toggle.
+            
+            // Climb (Step Y+, Spindle CW): Cut X+ (Left->Right).
+            // Conventional: Cut X- (Right->Left).
+            
+            let cutDir = 1; // 1 = L->R, -1 = R->L
+            if (p.facingDirection === 'conventional') cutDir = -1;
+            
+            // Initial Start Move
+            let startXRun = cutDir === 1 ? startX : endX;
+            lines.push(this.getRapidXY(startXRun + t.x, y + t.y));
             lines.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`);
             
-            while (y <= endY + 0.001) { // 0.001 epsilon
+            while (y <= endY + 0.001) {
                 // Cut X
-                const targetX = direction === 1 ? endX : startX;
+                const targetX = cutDir === 1 ? endX : startX;
                 lines.push(`G1 X${(targetX + t.x).toFixed(3)} Y${(y + t.y).toFixed(3)} F${p.feedRate}`);
                 
-                // Stepover Y if not finished
+                // Stepover Y
                 if (y < endY) {
                     let nextY = y + step;
-                    if (nextY > endY) nextY = endY; // Clamp to end? 
-                    // If we clamp, we might cut same line twice or partial. 
-                    // Better to go slightly past or stop? 
-                    // If y was startY (-50), endY (+50). Step 10.
-                    // -50, -40, ..., 40, 50. Perfect.
-                    // If Step 12. -50 -> X move. Step to -38. X move...
-                    // Eventually we reach close to 50.
-                    // If current y < endY, we step.
-                    // If nextY > endY, we set nextY = endY and do one last pass? Yes.
+                    if (nextY > endY) nextY = endY;
                     
-                    lines.push(`G1 X${(targetX + t.x).toFixed(3)} Y${(nextY + t.y).toFixed(3)} F${p.feedRate}`);
+                    if (p.facingDirection === 'both') {
+                        // Zig-Zag: Move Y, Toggle Dir
+                        lines.push(`G1 X${(targetX + t.x).toFixed(3)} Y${(nextY + t.y).toFixed(3)} F${p.feedRate}`);
+                        cutDir *= -1;
+                    } else {
+                        // One Way: Retract/Rapid Back?
+                        // Usually facing one-way keeps Z down? Or lifts?
+                        // Safer to lift if rapid-ing back over material? 
+                        // But if facing, we just cut the top off. 
+                        // If we rapid back at cut depth, we drag tool.
+                        // Ideally: Lift Z (RapidZ), Rapid XY to Start, Plunge.
+                        
+                        // Lift
+                        if (p.enableRapid) lines.push(`G1 Z${(p.safeZ).toFixed(3)} F${p.rapidZ}`); // Or SafeZ? Usually just a clearance.
+                        else lines.push(`G0 Z${(p.safeZ).toFixed(3)}`);
+                        
+                        // Move to Next Start
+                        const nextStartX = cutDir === 1 ? startX : endX;
+                        lines.push(this.getRapidXY(nextStartX + t.x, nextY + t.y));
+                        
+                        // Plunge
+                        lines.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`);
+                    }
+                    
                     y = nextY;
-                    direction *= -1;
                     
-                    if (y === endY && nextY === endY) { // Loop logic check
-                         // If we stepped exactly to endY, the while loop condition y<=endY runs again.
-                         // But we just did the Y-move. We need to do the X-move at endY.
-                         // The loop handles "Cut X".
-                         // So we just update y and loop.
+                    if (y === endY && nextY === endY) {
+                         // End of loop check (similar to before)
                     }
                 } else {
-                    break; // Finished Y extent
+                    break;
                 }
             }
             
             // Retract for next Z pass
             lines.push(this.getRapidZ(p.safeZ));
         }
+    }
+
+    getLeadIn(shape, startPos, offset, p) {
+        if (!p.leadType || p.leadType === 'none' || !p.leadInLen) return null;
+        
+        const len = p.leadInLen;
+        const feed = p.feedRate;
+        const moves = [];
+        let leadStart = { ...startPos };
+
+        // Tangent Vector at Start (Normalized)
+        // Square: Start Bottom-Left, First Move Right (1, 0)
+        // Circle: Start 3 o'clock, First Move Up (0, 1)
+        let tx = 0, ty = 0;
+        let nx = 0, ny = 0; // Normal pointing OUT from shape
+
+        if (shape === 'square' || shape === 'rectangle') {
+            tx = 1; ty = 0;
+            nx = 0; ny = -1; // Bottom edge normal is down
+        } else if (shape === 'circle') {
+            tx = 0; ty = 1;
+            nx = 1; ny = 0; // 3 o'clock normal is right
+        } else if (shape === 'sketch' && p.sketchPoints.length > 1) {
+             // Vector P0 -> P1
+             const p0 = p.sketchPoints[0];
+             const p1 = p.sketchPoints[1];
+             const dx = p1.x - p0.x;
+             const dy = p1.y - p0.y;
+             const mag = Math.sqrt(dx*dx + dy*dy);
+             if(mag > 0) { tx = dx/mag; ty = dy/mag; }
+             nx = ty; ny = -tx; // Right hand normal
+        }
+
+        if (p.leadType === 'linear') {
+            // Linear Tangent: Start = Target - Tangent * Len
+            leadStart.x = startPos.x - (tx * len);
+            leadStart.y = startPos.y - (ty * len);
+            moves.push(`G1 X${startPos.x.toFixed(3)} Y${startPos.y.toFixed(3)} F${feed}`);
+        } 
+        else if (p.leadType === 'radius' && shape === 'circle') {
+            // Radius Lead for Circle
+            // 90 deg arc
+            // Tangent at End (startPos) must be (tx, ty).
+            // Center of Arc must be perpendicular to tangent.
+            // If Outside Cut: Center is Outward. StartPos + Normal * R.
+            // If Inside Cut: Center is Inward. StartPos - Normal * R.
+            
+            const isInside = p.operation === 'inside';
+            // If Trace (center), treat as outside for now
+            
+            // Vector to Center
+            let cx = isInside ? -nx : nx; 
+            let cy = isInside ? -ny : ny;
+            
+            // Center Point
+            const centerX = startPos.x + (cx * len);
+            const centerY = startPos.y + (cy * len);
+            
+            // Start Point on Arc (90 deg back)
+            // Tangent at Start should be Perpendicular to (tx, ty).
+            // Actually simpler: Rotate StartPos around Center by +/- 90.
+            // If Outside (Center Out):
+            // Arc goes Left/In to touch wall.
+            // Start Point is (CenterX + ty*R, CenterY - tx*R)? 
+            
+            // Let's use relative I,J logic.
+            // End is StartPos.
+            // Center is (CenterX, CenterY).
+            // I_end = CenterX - StartPos.x = cx*len
+            // J_end = CenterY - StartPos.y = cy*len
+            
+            // Start of Arc: 
+            // We want G3 (CCW) or G2 (CW)? 
+            // Usually Lead In curves in same direction? 
+            // Circle is CCW. Lead In usually CCW.
+            
+            // If CCW Arc ending at StartPos with Tangent (tx, ty).
+            // Center is LEFT of Tangent.
+            // Tangent is (0, 1). Left is (-1, 0).
+            // So Center is at StartPos + (-1, 0)*R = StartPos - Normal*R?
+            // Wait, Normal for Circle (3 oclock) is (1, 0).
+            // So Center is StartPos - Normal*R = Inward?
+            // Yes, if we are tracing CCW, center of curvature is Inward.
+            // So a Tangent Arc must also have center Inward?
+            // That would mean Lead Arc is part of the Circle? No.
+            
+            // We want to come from Outside.
+            // So Center of Lead Arc must be Outward?
+            // If Center is Outward (Right), and we move CCW.
+            // 3 o'clock: Outward is Right. Center at (R+r, 0).
+            // Arc from (R+r, -r) -> (R, 0).
+            // Tangent at (R, 0) for that arc is (0, 1). Correct.
+            // So Center is Outward.
+            
+            if (p.operation === 'outside' || p.operation === 'center') {
+                // Center Outward
+                // Start Point: (StartPos.x + nx*len + ty*len, StartPos.y + ny*len - tx*len) ?
+                // Let's visualize. Center (Start.x + len, Start.y).
+                // We want to end at Start. Arc is CCW.
+                // Start Point must be "below".
+                // (Center.x, Center.y - len).
+                
+                // Rotated -90 deg relative to normal?
+                leadStart.x = centerX + (ny * len); 
+                leadStart.y = centerY + (-nx * len); // (0, -1) relative to Center
+                
+                // G3 to StartPos.
+                // I, J from LeadStart to Center.
+                const I = centerX - leadStart.x;
+                const J = centerY - leadStart.y;
+                
+                moves.push(`G3 X${startPos.x.toFixed(3)} Y${startPos.y.toFixed(3)} I${I.toFixed(3)} J${J.toFixed(3)} F${feed}`);
+                
+            } else {
+                // Inside: Center Inward.
+                // Center (Start.x - len, Start.y).
+                // We want end at Start. Arc CCW.
+                // Start Point must be "below"? No.
+                // If Center is Left. Arc CCW.
+                // To arrive at (R, 0) heading Up (0, 1).
+                // We must come from Right of Center?
+                // (Center.x + len, Center.y) = StartPos.
+                // That's a full circle?
+                // No.
+                // LeadIn: We want to start inside the hole.
+                // StartPos (R, 0). Center (R-len, 0).
+                // We want to arrive at (R, 0) moving Up.
+                // CCW Arc.
+                // Start must be (Center.x + len, Center.y) ?? That is StartPos.
+                
+                // Wait. If we are Inside, we want to start *further in*.
+                // And Arc *Out* to the wall.
+                // So Center should be somewhat Up/Down?
+                // Tangent at StartPos is Up.
+                // Perpendicular is Left/Right.
+                // Center must be on Left/Right line.
+                // If Center is Left (Inward):
+                // Arc touches StartPos at rightmost point.
+                // Tangent is Up.
+                // So we approach from Bottom-Right of Center?
+                // Start Point: (Center.x, Center.y - len).
+                // Moves to (Center.x + len, Center.y).
+                // I from Start to Center: (0, len).
+                // Start Point is (StartPos.x - len, StartPos.y - len).
+                
+                const cX = startPos.x - (nx * len);
+                const cY = startPos.y - (ny * len);
+                
+                leadStart.x = cX + (ny * len); // +0
+                leadStart.y = cY + (-nx * len); // -1 * len
+                
+                const I = cX - leadStart.x;
+                const J = cY - leadStart.y;
+                
+                moves.push(`G3 X${startPos.x.toFixed(3)} Y${startPos.y.toFixed(3)} I${I.toFixed(3)} J${J.toFixed(3)} F${feed}`);
+            }
+        }
+        else {
+             // Fallback for other shapes/modes to Linear or None
+             // For Square Radius lead - defaulting to Linear for safety as discussed
+             if (p.leadType === 'radius') {
+                 // Fallback Linear
+                 leadStart.x = startPos.x - (tx * len);
+                 leadStart.y = startPos.y - (ty * len);
+                 moves.push(`G1 X${startPos.x.toFixed(3)} Y${startPos.y.toFixed(3)} F${feed}`);
+             }
+        }
+
+        return { start: leadStart, moves: moves };
+    }
+
+    getLeadOut(shape, startPos, offset, p) {
+        if (!p.leadType || p.leadType === 'none' || !p.leadOutLen) return null;
+        
+        const len = p.leadOutLen;
+        const feed = p.feedRate;
+        const moves = [];
+        
+        // Tangent Vector at End (Same as Start for closed loop)
+        // We want to depart from StartPos.
+        // For Square: End Tangent is Down (0, -1). (Left Edge closing loop)
+        // For Circle: End Tangent is Up (0, 1). (Closing loop)
+        
+        let tx = 0, ty = 0;
+        let nx = 0, ny = 0;
+
+        if (shape === 'square' || shape === 'rectangle') {
+            tx = 0; ty = -1; // Moving Down
+            nx = 1; ny = 0;  // Normal Out (Right)
+        } else if (shape === 'circle') {
+            tx = 0; ty = 1; // Moving Up
+            nx = 1; ny = 0; // Normal Out (Right)
+        } else if (shape === 'sketch' && p.sketchPoints.length > 1) {
+            // Vector P_last -> P0
+            const p0 = p.sketchPoints[0];
+            const pLast = p.sketchPoints[p.sketchPoints.length - 1];
+            const dx = p0.x - pLast.x;
+            const dy = p0.y - pLast.y;
+            const mag = Math.sqrt(dx*dx + dy*dy);
+            if(mag > 0) { tx = dx/mag; ty = dy/mag; }
+             nx = ty; ny = -tx; 
+        }
+
+        if (p.leadType === 'linear') {
+            // Linear Tangent: Target = StartPos + Tangent * Len
+            const endX = startPos.x + (tx * len);
+            const endY = startPos.y + (ty * len);
+            moves.push(`G1 X${endX.toFixed(3)} Y${endY.toFixed(3)} F${feed}`);
+        }
+        else if (p.leadType === 'radius' && shape === 'circle') {
+             const isInside = p.operation === 'inside';
+             
+             // Center Position
+             // Outside: Outward (Start + N*len)
+             // Inside: Inward (Start - N*len)
+             let cx = isInside ? -nx : nx;
+             let cy = isInside ? -ny : ny;
+             
+             const cX = startPos.x + (cx * len);
+             const cY = startPos.y + (cy * len);
+             const I = cX - startPos.x;
+             const J = cY - startPos.y;
+             
+             // End Point Calculation
+             let relEndX, relEndY, dir;
+             
+             if (!isInside) {
+                 // Outside: Curve Right (Away) -> CW (G2)
+                 // Start Rel: (-len, 0) (if nx=1)
+                 // CW 90: (x,y) -> (y, -x)
+                 // (-len, 0) -> (0, len)
+                 // End Rel: (0, len) -> Up and Right.
+                 // Vector Math: Rotate (-cx, -cy) CW 90.
+                 // (-cx, -cy) is Vector Center->Start.
+                 // CW: (-cy, cx)
+                 relEndX = -cy * len;
+                 relEndY = cx * len;
+                 dir = 'G2';
+             } else {
+                 // Inside: Curve Left (Into Hole) -> CCW (G3)
+                 // Start Rel: (len, 0) (if nx=1, cx=-1).
+                 // Center is Left. Start is Right.
+                 // Vector Center->Start is (len, 0).
+                 // CCW 90: (x,y) -> (-y, x)
+                 // (len, 0) -> (0, len)
+                 // End Rel: (0, len) -> Up and Left.
+                 // Vector Math: Rotate (-cx, -cy) CCW 90.
+                 // CCW: (cy, -cx)
+                 // If cx=-1, cy=0. -cx=1. -> (0, 1). Correct.
+                 relEndX = cy * len;
+                 relEndY = -cx * len;
+                 dir = 'G3';
+             }
+             
+             const finalX = cX + relEndX;
+             const finalY = cY + relEndY;
+             
+             moves.push(`${dir} X${finalX.toFixed(3)} Y${finalY.toFixed(3)} I${I.toFixed(3)} J${J.toFixed(3)} F${feed}`);
+        }
+        else {
+             // Fallback Linear
+             if (p.leadType === 'radius') {
+                const endX = startPos.x + (tx * len);
+                const endY = startPos.y + (ty * len);
+                moves.push(`G1 X${endX.toFixed(3)} Y${endY.toFixed(3)} F${feed}`);
+             }
+        }
+        
+        return { moves };
     }
 
     getRapidZ(z) {
