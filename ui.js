@@ -156,6 +156,16 @@ function attachListeners() {
         });
     }
 
+    const rampCheck = getEl('enableRamp');
+    if (rampCheck) {
+        rampCheck.addEventListener('change', (e) => {
+            const enabled = e.target.checked;
+            getEl('rampAngle').disabled = !enabled;
+            getEl('rampMaxStep').disabled = !enabled;
+            getEl('rampClearance').disabled = !enabled;
+        });
+    }
+
     // Sketch Controls
     const clearBtn = getEl('clearSketchBtn');
     if (clearBtn) clearBtn.addEventListener('click', () => sketcher.clear());
@@ -318,6 +328,10 @@ function getParams() {
         enableRoughing: getEl('enableRoughing') ? getEl('enableRoughing').checked : false,
         roughingStepover: getNum('roughingStepover'),
         roughingPasses: getNum('roughingPasses'),
+        enableRamp: getEl('enableRamp') ? getEl('enableRamp').checked : false,
+        rampAngle: getNum('rampAngle'),
+        rampMaxStep: getNum('rampMaxStep'),
+        rampClearance: getNum('rampClearance'),
         facingDirection: getEl('facingDirection') ? getEl('facingDirection').value : 'both',
         stepover: getNum('stepover'),
         passExtX: getNum('passExtX'),

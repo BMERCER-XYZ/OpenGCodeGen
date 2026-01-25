@@ -53,12 +53,6 @@ export class GCodeGenerator {
                 const passOffsets = [];
                 
                 if (p.enableRoughing && p.roughingPasses > 0 && p.roughingStepover > 0) {
-                    // Direction Multiplier:
-                    // Outside (Cut Out): Roughing passes are larger. Offset increases. (+1)
-                    // Inside (Hole): Roughing passes are smaller. Offset decreases (more negative). (-1)
-                    // Center (Trace): Roughing? Maybe Stepover to Left/Right? 
-                    // Let's assume standard offset logic: Outside (+), Inside (-).
-                    
                     let dirMult = 0;
                     if (p.operation === 'outside') dirMult = 1;
                     else if (p.operation === 'inside') dirMult = -1;
@@ -89,23 +83,45 @@ export class GCodeGenerator {
                     
                     lines.push(this.getRapidXY(moveStart.x, moveStart.y));
                     
-                    // Plunge
-                    lines.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`); 
-                    
-                    // Lead In
-                    if (leadIn && leadIn.moves) lines.push(...leadIn.moves);
-                    
-                    // Cut Path
-                    lines.push(...this.getShapePath(p.shape, currentOffset, p.feedRate, currentZ));
+                    if (p.enableRamp) {
+                        // Ramping Logic
+                        // Start ramping from previous level + clearance
+                        // Previous level = currentZ + passDepth.
+                        const prevZ = currentZ + p.passDepth;
+                        const rampStartZ = prevZ + (p.rampClearance || 0.5);
+                        
+                        // Move to Ramp Start Height
+                        lines.push(this.getRapidZ(rampStartZ));
+                        
+                        // Ramp Down
+                        const rampData = {
+                            startZ: rampStartZ,
+                            targetZ: currentZ,
+                            angle: p.rampAngle || 2
+                        };
+                        lines.push(`; Ramping from Z${rampStartZ.toFixed(3)} to Z${currentZ.toFixed(3)}`);
+                        lines.push(...this.getShapePath(p.shape, currentOffset, p.feedRate, currentZ, rampData));
+                        
+                        // Final Flat Pass (Clean up)
+                        lines.push(...this.getShapePath(p.shape, currentOffset, p.feedRate, currentZ));
+                        
+                    } else {
+                        // Plunge
+                        lines.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`); 
+                        
+                        // Lead In
+                        if (leadIn && leadIn.moves) lines.push(...leadIn.moves);
+                        
+                        // Cut Path
+                        lines.push(...this.getShapePath(p.shape, currentOffset, p.feedRate, currentZ));
+                    }
                     
                     // Lead Out
                     if (leadOut && leadOut.moves) lines.push(...leadOut.moves);
                     
-                    // Retract slightly if roughing to avoid dragging?
-                    // Or just Rapid XY to next start? 
-                    // Usually safer to lift if multiple passes at same Z.
-                    if (!isFinish) {
-                         lines.push(this.getRapidZ(p.safeZ));
+                    // Retract
+                    if (!isFinish || p.enableRamp) {
+                        lines.push(this.getRapidZ(p.safeZ));
                     }
                 });
             }
@@ -565,7 +581,7 @@ export class GCodeGenerator {
         return { x: 0, y: 0 };
     }
 
-    getShapePath(shape, offset, feedRate, currentZ) {
+    getShapePath(shape, offset, feedRate, currentZ, rampData = null) {
         const p = this.params;
         const t = this.getTranslation();
         const moves = [];
@@ -573,7 +589,86 @@ export class GCodeGenerator {
         // Tab Logic
         const tabTopZ = -(p.targetDepth - p.tabThickness);
         // We cut tabs if currentZ is LOWER (deeper) than the top of the tab
-        const isTabPass = p.enableTabs && p.tabs && p.tabs.length > 0 && (currentZ < tabTopZ - 0.001);
+        const isTabPass = !rampData && p.enableTabs && p.tabs && p.tabs.length > 0 && (currentZ < tabTopZ - 0.001);
+
+        if (rampData) {
+            // RAMPING GENERATION
+            const totalDrop = rampData.targetZ - rampData.startZ; // Negative
+            const angleRad = (rampData.angle * Math.PI) / 180;
+            const distNeeded = Math.abs(totalDrop) / Math.tan(angleRad);
+            
+            // Calculate Perimeter
+            let perimeter = 0;
+            if (shape === 'circle') {
+                const r = (p.diameter / 2) + offset;
+                perimeter = 2 * Math.PI * Math.abs(r); 
+            } else if (shape === 'square' || shape === 'rectangle') {
+                const wRaw = (shape === 'square' ? p.width : p.width);
+                const hRaw = (shape === 'square' ? p.width : p.height);
+                // Approx perimeter based on bounding box + offset
+                 const wEff = wRaw + (offset * 2);
+                 const hEff = hRaw + (offset * 2);
+                 perimeter = (Math.abs(wEff) * 2) + (Math.abs(hEff) * 2);
+            }
+            
+            if (perimeter <= 0) perimeter = 1; // Safety
+            
+            const loops = Math.ceil(distNeeded / perimeter);
+            const dropPerLoop = totalDrop / loops;
+            
+            let zCursor = rampData.startZ;
+            
+            for (let l = 0; l < loops; l++) {
+                const loopEndZ = zCursor + dropPerLoop;
+                // Clamp last loop to exact target
+                const targetZForLoop = (l === loops - 1) ? rampData.targetZ : loopEndZ;
+                const dropForThisLoop = targetZForLoop - zCursor;
+                
+                if (shape === 'circle') {
+                    const r = (p.diameter / 2) + offset;
+                    // Full Circle Helix
+                    const endX = r + t.x;
+                    const endY = 0 + t.y;
+                    const I = -r;
+                    const J = 0;
+                    moves.push(`G3 X${endX.toFixed(3)} Y${endY.toFixed(3)} Z${targetZForLoop.toFixed(3)} I${I.toFixed(3)} J${J.toFixed(3)} F${feedRate}`);
+                } 
+                else if (shape === 'square' || shape === 'rectangle') {
+                    // Linear Helix
+                    const wRaw = (shape === 'square' ? p.width : p.width);
+                    const hRaw = (shape === 'square' ? p.width : p.height);
+                    const w = wRaw / 2 + offset;
+                    const h = hRaw / 2 + offset;
+
+                    const bl = { x: -w, y: -h }; 
+                    const br = { x: w, y: -h };
+                    const tr = { x: w, y: h };
+                    const tl = { x: -w, y: h };
+                    
+                    const sides = [
+                        { start: bl, end: br, len: Math.abs(w*2) },
+                        { start: br, end: tr, len: Math.abs(h*2) },
+                        { start: tr, end: tl, len: Math.abs(w*2) },
+                        { start: tl, end: bl, len: Math.abs(h*2) }
+                    ];
+                    
+                    const totalLen = sides.reduce((s, side) => s + side.len, 0);
+                    
+                    sides.forEach(side => {
+                        const fraction = side.len / totalLen;
+                        const zDropSide = dropForThisLoop * fraction;
+                        zCursor += zDropSide; // Increment cursor
+                        moves.push(`G1 X${(side.end.x + t.x).toFixed(3)} Y${(side.end.y + t.y).toFixed(3)} Z${zCursor.toFixed(3)} F${feedRate}`);
+                    });
+                    
+                    zCursor = targetZForLoop; 
+                    continue; 
+                }
+                
+                zCursor = targetZForLoop;
+            }
+            return moves;
+        }
 
         if (shape === 'sketch') {
             if (p.sketchPoints && p.sketchPoints.length > 1) {
