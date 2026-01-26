@@ -32,6 +32,8 @@ export class GCodeGenerator {
 
         if (p.opType === 'facing') {
             this.generateFacing(lines, p);
+        } else if (p.opType === 'text') {
+            this.generateText(lines, p);
         } else {
             // Contour / Sketch Logic
             
@@ -133,6 +135,93 @@ export class GCodeGenerator {
         lines.push('M30 ; End of program');
 
         return lines.join('\n');
+    }
+
+    generateFacing(lines, p) {
+        // Facing Logic: Zig-Zag over the Shape area (Rectangular bounding box)
+        // ... (existing facing code)
+    }
+
+    generateText(lines, p) {
+        const textObjects = p.textObjects || [];
+        const t = this.getTranslation();
+
+        textObjects.forEach(obj => {
+            lines.push(`; Text: ${obj.text} at ${obj.x}, ${obj.y}`);
+            
+            let cursorX = obj.x + t.x;
+            let cursorY = obj.y + t.y;
+            const scale = obj.size / 10; // Base font size is 10 units
+
+            for (const char of obj.text.toUpperCase()) {
+                const paths = this.getCharacterPath(char);
+                paths.forEach(path => {
+                    if (path.length < 1) return;
+
+                    // Move to start of path
+                    lines.push(this.getRapidXY(cursorX + path[0].x * scale, cursorY + path[0].y * scale));
+                    
+                    // Plunge
+                    lines.push(`G1 Z${(-p.targetDepth).toFixed(3)} F${p.feedRate / 2}`);
+
+                    // Trace path
+                    for (let i = 1; i < path.length; i++) {
+                        lines.push(`G1 X${(cursorX + path[i].x * scale).toFixed(3)} Y${(cursorY + path[i].y * scale).toFixed(3)} F${p.feedRate}`);
+                    }
+
+                    // Retract
+                    lines.push(this.getRapidZ(p.safeZ));
+                });
+                cursorX += 8 * scale; // Character width + spacing
+            }
+        });
+    }
+
+    getCharacterPath(char) {
+        // Simple "Stick Font" definitions (10 units high, ~6 units wide)
+        // Returns array of paths, each path is array of {x, y}
+        const font = {
+            'A': [[{x:0,y:0}, {x:3,y:10}, {x:6,y:0}], [{x:1,y:4}, {x:5,y:4}]],
+            'B': [[{x:0,y:0}, {x:0,y:10}, {x:4,y:10}, {x:5,y:9}, {x:5,y:6}, {x:4,y:5}, {x:0,y:5}], [{x:0,y:5}, {x:5,y:5}, {x:6,y:4}, {x:6,y:1}, {x:5,y:0}, {x:0,y:0}]],
+            'C': [[{x:6,y:2}, {x:4,y:0}, {x:1,y:0}, {x:0,y:2}, {x:0,y:8}, {x:1,y:10}, {x:4,y:10}, {x:6,y:8}]],
+            'D': [[{x:0,y:0}, {x:0,y:10}, {x:4,y:10}, {x:6,y:8}, {x:6,y:2}, {x:4,y:0}, {x:0,y:0}]],
+            'E': [[{x:6,y:0}, {x:0,y:0}, {x:0,y:10}, {x:6,y:10}], [{x:0,y:5}, {x:4,y:5}]],
+            'F': [[{x:0,y:0}, {x:0,y:10}, {x:6,y:10}], [{x:0,y:5}, {x:4,y:5}]],
+            'G': [[{x:6,y:8}, {x:4,y:10}, {x:1,y:10}, {x:0,y:8}, {x:0,y:2}, {x:1,y:0}, {x:4,y:0}, {x:6,y:2}, {x:6,y:5}, {x:3,y:5}]],
+            'H': [[{x:0,y:0}, {x:0,y:10}], [{x:6,y:0}, {x:6,y:10}], [{x:0,y:5}, {x:6,y:5}]],
+            'I': [[{x:3,y:0}, {x:3,y:10}], [{x:1,y:0}, {x:5,y:0}], [{x:1,y:10}, {x:5,y:10}]],
+            'J': [[{x:0,y:2}, {x:2,y:0}, {x:4,y:0}, {x:4,y:10}, {x:1,y:10}]],
+            'K': [[{x:0,y:0}, {x:0,y:10}], [{x:0,y:5}, {x:5,y:10}], [{x:0,y:5}, {x:5,y:0}]],
+            'L': [[{x:0,y:10}, {x:0,y:0}, {x:6,y:0}]],
+            'M': [[{x:0,y:0}, {x:0,y:10}, {x:3,y:7}, {x:6,y:10}, {x:6,y:0}]],
+            'N': [[{x:0,y:0}, {x:0,y:10}, {x:6,y:0}, {x:6,y:10}]],
+            'O': [[{x:1,y:0}, {x:0,y:2}, {x:0,y:8}, {x:1,y:10}, {x:5,y:10}, {x:6,y:8}, {x:6,y:2}, {x:5,y:0}, {x:1,y:0}]],
+            'P': [[{x:0,y:0}, {x:0,y:10}, {x:4,y:10}, {x:6,y:8}, {x:6,y:6}, {x:4,y:5}, {x:0,y:5}]],
+            'Q': [[{x:1,y:0}, {x:0,y:2}, {x:0,y:8}, {x:1,y:10}, {x:5,y:10}, {x:6,y:8}, {x:6,y:2}, {x:5,y:0}, {x:1,y:0}], [{x:4,y:2}, {x:6,y:0}]],
+            'R': [[{x:0,y:0}, {x:0,y:10}, {x:4,y:10}, {x:6,y:8}, {x:6,y:6}, {x:4,y:5}, {x:0,y:5}], [{x:3,y:5}, {x:6,y:0}]],
+            'S': [[{x:0,y:2}, {x:2,y:0}, {x:4,y:0}, {x:6,y:2}, {x:6,y:4}, {x:0,y:6}, {x:0,y:8}, {x:2,y:10}, {x:4,y:10}, {x:6,y:8}]],
+            'T': [[{x:3,y:0}, {x:3,y:10}], [{x:0,y:10}, {x:6,y:10}]],
+            'U': [[{x:0,y:10}, {x:0,y:2}, {x:2,y:0}, {x:4,y:0}, {x:6,y:2}, {x:6,y:10}]],
+            'V': [[{x:0,y:10}, {x:3,y:0}, {x:6,y:10}]],
+            'W': [[{x:0,y:10}, {x:1,y:0}, {x:3,y:4}, {x:5,y:0}, {x:6,y:10}]],
+            'X': [[{x:0,y:0}, {x:6,y:10}], [{x:0,y:10}, {x:6,y:0}]],
+            'Y': [[{x:3,y:0}, {x:3,y:5}, {x:0,y:10}], [{x:3,y:5}, {x:6,y:10}]],
+            'Z': [[{x:0,y:10}, {x:6,y:10}, {x:0,y:0}, {x:6,y:0}]],
+            '0': [[{x:1,y:0}, {x:0,y:2}, {x:0,y:8}, {x:1,y:10}, {x:5,y:10}, {x:6,y:8}, {x:6,y:2}, {x:5,y:0}, {x:1,y:0}], [{x:5,y:8}, {x:1,y:2}]],
+            '1': [[{x:1,y:8}, {x:3,y:10}, {x:3,y:0}], [{x:1,y:0}, {x:5,y:0}]],
+            '2': [[{x:0,y:8}, {x:2,y:10}, {x:4,y:10}, {x:6,y:8}, {x:6,y:5}, {x:0,y:0}, {x:6,y:0}]],
+            '3': [[{x:0,y:8}, {x:2,y:10}, {x:4,y:10}, {x:6,y:8}, {x:6,y:6}, {x:4,y:5}, {x:6,y:4}, {x:6,y:2}, {x:4,y:0}, {x:2,y:0}, {x:0,y:2}], [{x:2,y:5}, {x:4,y:5}]],
+            '4': [[{x:4,y:0}, {x:4,y:10}, {x:0,y:3}, {x:6,y:3}]],
+            '5': [[{x:6,y:10}, {x:0,y:10}, {x:0,y:5}, {x:4,y:5}, {x:6,y:4}, {x:6,y:2}, {x:4,y:0}, {x:0,y:0}]],
+            '6': [[{x:5,y:10}, {x:2,y:10}, {x:0,y:8}, {x:0,y:2}, {x:2,y:0}, {x:4,y:0}, {x:6,y:2}, {x:6,y:4}, {x:4,y:5}, {x:0,y:5}]],
+            '7': [[{x:0,y:10}, {x:6,y:10}, {x:2,y:0}]],
+            '8': [[{x:2,y:5}, {x:1,y:6}, {x:1,y:9}, {x:2,y:10}, {x:4,y:10}, {x:5,y:9}, {x:5,y:6}, {x:4,y:5}, {x:5,y:4}, {x:5,y:1}, {x:4,y:0}, {x:2,y:0}, {x:1,y:1}, {x:1,y:4}, {x:2,y:5}]],
+            '9': [[{x:6,y:5}, {x:2,y:5}, {x:0,y:6}, {x:0,y:8}, {x:2,y:10}, {x:4,y:10}, {x:6,y:8}, {x:6,y:2}, {x:4,y:0}, {x:1,y:0}]],
+            ' ': [],
+            '-': [[{x:1,y:5}, {x:5,y:5}]],
+            '.': [[{x:2.5,y:0}, {x:3.5,y:0}, {x:3.5,y:1}, {x:2.5,y:1}, {x:2.5,y:0}]]
+        };
+        return font[char] || [];
     }
 
     generateFacing(lines, p) {

@@ -63,9 +63,17 @@ function updateUIState() {
     
     if (!opType) return;
     const isFacing = opType.value === 'facing';
+    const isText = opType.value === 'text';
     
-    if (cConfig) cConfig.style.display = isFacing ? 'none' : 'block';
+    if (cConfig) cConfig.style.display = (isFacing || isText) ? 'none' : 'block';
     if (fConfig) fConfig.style.display = isFacing ? 'grid' : 'none';
+    
+    if (isText) {
+        switchTab('view-sketch');
+        const shapeSel = getEl('shapeSelect');
+        if (shapeSel) shapeSel.value = 'sketch';
+        renderDimensions('sketch');
+    }
 }
 
 function setupTabs() {
@@ -170,6 +178,31 @@ function attachListeners() {
     const clearBtn = getEl('clearSketchBtn');
     if (clearBtn) clearBtn.addEventListener('click', () => sketcher.clear());
     
+    const vertexModeBtn = getEl('vertexModeBtn');
+    const textModeBtn = getEl('textModeBtn');
+    const textInputContainer = getEl('sketchTextInputContainer');
+    const sketchHint = getEl('sketchHint');
+
+    if (vertexModeBtn && textModeBtn) {
+        vertexModeBtn.addEventListener('click', () => {
+            sketcher.setMode('vertex');
+            vertexModeBtn.classList.remove('outline');
+            textModeBtn.classList.add('outline');
+            textInputContainer.style.display = 'none';
+            sketchHint.textContent = 'Click start to close.';
+        });
+        textModeBtn.addEventListener('click', () => {
+            sketcher.setMode('text');
+            textModeBtn.classList.remove('outline');
+            vertexModeBtn.classList.add('outline');
+            textInputContainer.style.display = 'flex';
+            sketchHint.textContent = 'Click to place text.';
+        });
+    }
+
+    if(getEl('sketchText')) getEl('sketchText').addEventListener('input', () => sketcher.draw());
+    if(getEl('sketchTextSize')) getEl('sketchTextSize').addEventListener('input', () => sketcher.draw());
+
     if(getEl('zoomInBtn')) getEl('zoomInBtn').addEventListener('click', () => sketcher.zoom(1.2));
     if(getEl('zoomOutBtn')) getEl('zoomOutBtn').addEventListener('click', () => sketcher.zoom(0.8));
     
@@ -349,7 +382,8 @@ function getParams() {
         tabWidth: getNum('tabWidth'),
         tabThickness: getNum('tabThickness'),
         tabs: [...tabs],
-        sketchPoints: sketcher ? sketcher.getPoints() : []
+        sketchPoints: sketcher ? sketcher.getPoints() : [],
+        textObjects: sketcher ? sketcher.getTextObjects() : []
     };
 
     if (shape === 'square') {

@@ -3,6 +3,8 @@ export class Sketcher {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d');
         this.points = [];
+        this.textObjects = [];
+        this.mode = 'vertex'; // 'vertex' or 'text'
         this.isClosed = false;
         this.gridSize = 10; // 10mm
         this.scale = 1; // Pixels per mm, usually handled by draw transform
@@ -55,11 +57,35 @@ export class Sketcher {
         return { x: sx, y: sy };
     }
 
-    onClick(e) {
-        if (this.isClosed) return;
+    setMode(mode) {
+        this.mode = mode;
+        this.draw();
+    }
 
+    onClick(e) {
         const raw = this.screenToLogic(this.getMousePos(e));
         const p = this.snap(raw);
+
+        if (this.mode === 'text') {
+            const textEl = document.getElementById('sketchText');
+            const sizeEl = document.getElementById('sketchTextSize');
+            const text = textEl ? textEl.value : 'TEXT';
+            const size = sizeEl ? parseFloat(sizeEl.value) : 10;
+            
+            if (text) {
+                this.textObjects.push({
+                    text: text,
+                    x: p.x,
+                    y: p.y,
+                    size: size
+                });
+                this.draw();
+                this.triggerUpdate();
+            }
+            return;
+        }
+
+        if (this.isClosed) return;
 
         // Check closing
         if (this.points.length > 2) {
@@ -80,12 +106,8 @@ export class Sketcher {
     }
 
     onMove(e) {
-        if (this.isClosed) {
-            this.mousePos = null;
-        } else {
-            const raw = this.screenToLogic(this.getMousePos(e));
-            this.mousePos = this.snap(raw);
-        }
+        const raw = this.screenToLogic(this.getMousePos(e));
+        this.mousePos = this.snap(raw);
         this.draw();
     }
 
@@ -99,8 +121,6 @@ export class Sketcher {
         this.ctx.lineWidth = 1;
         
         // Calculate grid lines
-        // Width 500 / 2 = 250px center.
-        // Step 10mm * 2px/mm = 20px step.
         const step = this.gridSize * this.pixelsPerUnit;
         const w = this.canvas.width;
         const h = this.canvas.height;
@@ -138,7 +158,7 @@ export class Sketcher {
                 this.ctx.closePath();
                 this.ctx.fillStyle = 'rgba(0, 123, 255, 0.2)'; // Watertight blue
                 this.ctx.fill();
-            } else if (this.mousePos) {
+            } else if (this.mousePos && this.mode === 'vertex') {
                 // Preview line
                 const m = this.logicToScreen(this.mousePos);
                 this.ctx.lineTo(m.x, m.y);
@@ -175,7 +195,7 @@ export class Sketcher {
             });
             
             // Highlight Start if hovering to close
-            if (!this.isClosed && this.mousePos && this.points.length > 2) {
+            if (!this.isClosed && this.mousePos && this.points.length > 2 && this.mode === 'vertex') {
                  const startLogic = this.points[0];
                  const dist = Math.sqrt(Math.pow(this.mousePos.x - startLogic.x, 2) + Math.pow(this.mousePos.y - startLogic.y, 2));
                  if (dist < 0.1) { // Same snapped point
@@ -186,20 +206,46 @@ export class Sketcher {
                      this.ctx.fill();
                  }
             }
-        } else {
-             // Show cursor
-             if (this.mousePos) {
-                 const m = this.logicToScreen(this.mousePos);
-                 this.ctx.fillStyle = '#aaa';
-                 this.ctx.beginPath();
-                 this.ctx.arc(m.x, m.y, 3, 0, Math.PI * 2);
-                 this.ctx.fill();
-             }
+        }
+
+        // Draw Text Objects
+        this.textObjects.forEach(obj => {
+            const s = this.logicToScreen(obj);
+            this.ctx.save();
+            this.ctx.font = `${obj.size * this.pixelsPerUnit}px monospace`;
+            this.ctx.fillStyle = '#000';
+            this.ctx.textBaseline = 'bottom';
+            this.ctx.fillText(obj.text, s.x, s.y);
+            this.ctx.restore();
+        });
+
+        // Show cursor/preview
+        if (this.mousePos) {
+            const m = this.logicToScreen(this.mousePos);
+            if (this.mode === 'text') {
+                const textEl = document.getElementById('sketchText');
+                const sizeEl = document.getElementById('sketchTextSize');
+                const text = textEl ? textEl.value : 'TEXT';
+                const size = sizeEl ? parseFloat(sizeEl.value) : 10;
+                
+                this.ctx.save();
+                this.ctx.font = `${size * this.pixelsPerUnit}px monospace`;
+                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                this.ctx.textBaseline = 'bottom';
+                this.ctx.fillText(text, m.x, m.y);
+                this.ctx.restore();
+            } else if (this.points.length === 0) {
+                this.ctx.fillStyle = '#aaa';
+                this.ctx.beginPath();
+                this.ctx.arc(m.x, m.y, 3, 0, Math.PI * 2);
+                this.ctx.fill();
+            }
         }
     }
 
     clear() {
         this.points = [];
+        this.textObjects = [];
         this.isClosed = false;
         this.draw();
         this.triggerUpdate();
@@ -207,6 +253,10 @@ export class Sketcher {
 
     getPoints() {
         return this.isClosed ? this.points : [];
+    }
+
+    getTextObjects() {
+        return this.textObjects;
     }
     
     // Callback registration

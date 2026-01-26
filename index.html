@@ -194,6 +194,19 @@
                         <div style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                             <button id="clearSketchBtn" class="outline small secondary">Clear</button>
                             <span style="border-left: 1px solid #ccc; height: 20px; margin: 0 5px;"></span>
+                            
+                            <div role="group">
+                                <button id="vertexModeBtn" class="small">Vertex Mode</button>
+                                <button id="textModeBtn" class="small outline">Text Mode</button>
+                            </div>
+                            
+                            <div id="sketchTextInputContainer" style="display: none; align-items: center; gap: 0.5rem;">
+                                <input type="text" id="sketchText" placeholder="Enter text..." style="margin-bottom: 0; width: 150px;">
+                                <input type="number" id="sketchTextSize" value="10" min="1" style="margin-bottom: 0; width: 60px;">
+                                <small>mm</small>
+                            </div>
+
+                            <span style="border-left: 1px solid #ccc; height: 20px; margin: 0 5px;"></span>
                             <small>Zoom:</small>
                             <button id="zoomInBtn" class="outline small">+</button>
                             <button id="zoomOutBtn" class="outline small">-</button>
@@ -203,7 +216,7 @@
                             <span id="gridSizeDisplay">10mm</span>
                             <button id="gridDecBtn" class="outline small">-</button>
                             
-                            <small style="margin-left: auto;">Click start to close.</small>
+                            <small id="sketchHint" style="margin-left: auto;">Click start to close.</small>
                         </div>
                         <div class="canvas-container">
                             <canvas id="sketchCanvas" width="1000" height="600"></canvas>
@@ -234,6 +247,7 @@
                         <select id="opType">
                             <option value="contour">2D Contour</option>
                             <option value="facing">Facing</option>
+                            <option value="text">Text Engraving</option>
                         </select>
                     </label>
 
