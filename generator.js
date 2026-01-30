@@ -109,7 +109,7 @@ export class GCodeGenerator {
                         
                     } else {
                         // Plunge
-                        lines.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`); 
+                        lines.push(`G1 Z${currentZ.toFixed(3)} F${p.plungeRate}`); 
                         
                         // Lead In
                         if (leadIn && leadIn.moves) lines.push(...leadIn.moves);
@@ -162,7 +162,7 @@ export class GCodeGenerator {
                     lines.push(this.getRapidXY(cursorX + path[0].x * scale, cursorY + path[0].y * scale));
                     
                     // Plunge
-                    lines.push(`G1 Z${(-p.targetDepth).toFixed(3)} F${p.feedRate / 2}`);
+                    lines.push(`G1 Z${(-p.targetDepth).toFixed(3)} F${p.plungeRate}`);
 
                     // Trace path
                     for (let i = 1; i < path.length; i++) {
@@ -281,7 +281,7 @@ export class GCodeGenerator {
             // Initial Start Move
             let startXRun = cutDir === 1 ? startX : endX;
             lines.push(this.getRapidXY(startXRun + t.x, y + t.y));
-            lines.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`);
+            lines.push(`G1 Z${currentZ.toFixed(3)} F${p.plungeRate}`);
             
             while (y <= endY + 0.001) {
                 // Cut X
@@ -314,7 +314,7 @@ export class GCodeGenerator {
                         lines.push(this.getRapidXY(nextStartX + t.x, nextY + t.y));
                         
                         // Plunge
-                        lines.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`);
+                        lines.push(`G1 Z${currentZ.toFixed(3)} F${p.plungeRate}`);
                     }
                     
                     y = nextY;
@@ -839,7 +839,7 @@ export class GCodeGenerator {
                             moves.push(`G1 X${(pEnd.x + t.x).toFixed(3)} Y${(pEnd.y + t.y).toFixed(3)} F${feedRate}`);
                             
                             // Plunge back to currentZ
-                             moves.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`);
+                             moves.push(`G1 Z${currentZ.toFixed(3)} F${p.plungeRate}`);
                         }
                     });
                     
@@ -932,7 +932,7 @@ export class GCodeGenerator {
                         moves.push(`G3 X${tabEnd.x.toFixed(3)} Y${tabEnd.y.toFixed(3)} I${I.toFixed(3)} J${J.toFixed(3)} F${feedRate}`);
 
                         // Plunge
-                        moves.push(`G1 Z${currentZ.toFixed(3)} F${p.feedRate / 2}`);
+                        moves.push(`G1 Z${currentZ.toFixed(3)} F${p.plungeRate}`);
                         
                         currentAngle = endA;
                     }

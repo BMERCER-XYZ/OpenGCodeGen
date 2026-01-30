@@ -374,6 +374,7 @@ function getParams() {
         safeZ: getNum('safeZ'),
         spindleSpeed: getNum('spindleSpeed'),
         feedRate: getNum('feedRate'),
+        plungeRate: getNum('plungeRate'),
         enableRapid: getEl('enableRapid').checked,
         rapidXY: getNum('rapidXY'),
         rapidZ: getNum('rapidZ'),
