@@ -247,6 +247,33 @@ function attachListeners() {
             if(e.target.value) getEl('targetDepth').value = e.target.value;
         });
     }
+
+    // Solid Stock Controls
+    const initStockBtn = getEl('initStockBtn');
+    const toggleStockBtn = getEl('toggleStockBtn');
+    if (initStockBtn && toggleStockBtn) {
+        initStockBtn.addEventListener('click', () => {
+             if(simViewer) {
+                 simViewer.initSolidStock();
+                 toggleStockBtn.disabled = false;
+                 toggleStockBtn.textContent = "View: Solid";
+                 toggleStockBtn.classList.remove('outline');
+             }
+        });
+        
+        toggleStockBtn.addEventListener('click', () => {
+             if(simViewer) {
+                simViewer.toggleStockMode();
+                if (simViewer.isSolidMode) {
+                    toggleStockBtn.textContent = "View: Solid";
+                    toggleStockBtn.classList.remove('outline');
+                } else {
+                    toggleStockBtn.textContent = "View: Wireframe";
+                    toggleStockBtn.classList.add('outline');
+                }
+             }
+        });
+    }
     
     // Tab Listeners
     const tabCheck = getEl('enableTabs');
@@ -438,6 +465,15 @@ function update() {
             lineOffsets.push({ start: cursor, end: cursor + line.length });
             cursor += line.length + 1; // +1 for \n
         });
+
+        // Reset Solid Stock UI
+        const initBtn = getEl('initStockBtn');
+        const togBtn = getEl('toggleStockBtn');
+        if(initBtn && togBtn) {
+            togBtn.disabled = true;
+            togBtn.textContent = "View: Wireframe";
+            togBtn.classList.add('outline');
+        }
 
         drawPreview(params);
     // Draw 3D

@@ -32,6 +32,12 @@ export class GCodeViewer {
         this.progressCallback = null;
         this.zOffset = 0; // Shift to sit on grid
 
+        // Solid Simulation
+        this.solidStockMesh = null;
+        this.isSolidMode = false;
+        this.stockDims = { w: 100, h: 100, t: 1, origin: 'center' };
+        this.simParams = {}; // Store for tool dia
+
         this.init();
     }
 
@@ -109,16 +115,24 @@ export class GCodeViewer {
     }
 
     update(gcode, params) {
+        this.simParams = params;
         this.updateStock(params);
         return this.parseGCode(gcode, params);
     }
 
     updateStock(params) {
         if (this.stockMesh) this.scene.remove(this.stockMesh);
+        if (this.solidStockMesh) {
+            this.scene.remove(this.solidStockMesh);
+            this.solidStockMesh = null;
+            this.isSolidMode = false;
+        }
 
         const w = params.stockWidth || 100;
         const h = params.stockHeight || 100;
         const t = params.stockThickness || 1;
+        this.stockDims = { w, h, t, origin: params.origin || 'stock-center' };
+
         this.zOffset = t;
         if(this.axesHelper) this.axesHelper.position.z = this.zOffset;
 
@@ -146,6 +160,154 @@ export class GCodeViewer {
         this.stockMesh.position.set(shiftX, shiftY, t/2);
         this.scene.add(this.stockMesh);
     }
+
+    // --- Solid Simulation Logic ---
+    
+    initSolidStock() {
+        if (this.solidStockMesh) {
+            this.scene.remove(this.solidStockMesh);
+            this.solidStockMesh.geometry.dispose();
+            this.solidStockMesh.material.dispose();
+        }
+
+        const { w, h, t } = this.stockDims;
+        // Resolution: ~0.5mm per segment, max 256
+        let segW = Math.min(256, Math.floor(w * 2));
+        let segH = Math.min(256, Math.floor(h * 2));
+        
+        // Ensure at least some resolution
+        segW = Math.max(10, segW);
+        segH = Math.max(10, segH);
+
+        const geometry = new THREE.PlaneGeometry(w, h, segW, segH);
+        
+        // Initial Z is at top surface (t)
+        
+        // Add vertex colors for visual flair (White top, Darker bottom)
+        const count = geometry.attributes.position.count;
+        const colors = [];
+        for (let i = 0; i < count; i++) {
+            colors.push(0.9, 0.9, 0.9); // White-ish
+        }
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+        // Use Basic Material to rely purely on Vertex Colors (fast, no normal updates needed)
+        const material = new THREE.MeshBasicMaterial({
+            vertexColors: true,
+            side: THREE.DoubleSide
+        });
+
+        this.solidStockMesh = new THREE.Mesh(geometry, material);
+        
+        // Position same as wireframe stock (but at top surface Z=t)
+        this.solidStockMesh.position.copy(this.stockMesh.position);
+        this.solidStockMesh.position.z = this.stockDims.t; // Top surface
+
+        this.scene.add(this.solidStockMesh);
+        
+        this.isSolidMode = true;
+        this.stockMesh.visible = false; // Hide wireframe
+        
+        // Re-bind to grid props for fast access
+        this.solidStockMesh.userData = {
+            segW, segH, w, h
+        };
+    }
+
+    toggleStockMode() {
+        if (!this.solidStockMesh) return;
+        this.isSolidMode = !this.isSolidMode;
+        this.solidStockMesh.visible = this.isSolidMode;
+        this.stockMesh.visible = !this.isSolidMode;
+    }
+
+    carve(toolPos) {
+        if (!this.solidStockMesh || !this.isSolidMode) return;
+
+        const geo = this.solidStockMesh.geometry;
+        const positions = geo.attributes.position;
+        const colors = geo.attributes.color;
+        const { segW, segH, w, h } = this.solidStockMesh.userData;
+        
+        // Tool Props
+        const toolR = (this.simParams.toolDiameter || 3.175) / 2;
+        
+        // Tool Pos is World. Convert to Local.
+        const localX = toolPos.x - this.solidStockMesh.position.x;
+        const localY = toolPos.y - this.solidStockMesh.position.y;
+        const localToolZ = toolPos.z - this.solidStockMesh.position.z; 
+        
+        // Optimization: Bounding Box of Tool in Grid Index
+        // Plane goes from -w/2 to +w/2
+        const gridX = ((localX + w/2) / w) * segW;
+        
+        // Three.js PlaneGeometry (default) creates Y from Top (+h/2) to Bottom (-h/2)
+        // So Y=+h/2 is index 0. Y=-h/2 is index segH.
+        // Map localY (-h/2 to +h/2) to (segH to 0)
+        // 1. Normalize Y to 0..1 (Bottom to Top): (localY + h/2) / h
+        // 2. Invert for Grid: 1 - Normalized
+        // 3. Scale by segH
+        const normY = (localY + h/2) / h;
+        const gridY = (1.0 - normY) * segH;
+        
+        // Range of indices to check (Square around tool)
+        const radGridW = (toolR / w) * segW;
+        const radGridH = (toolR / h) * segH;
+        
+        const pad = 2; // Increased padding to be safe
+        const iMin = Math.max(0, Math.floor(gridX - radGridW - pad));
+        const iMax = Math.min(segW, Math.ceil(gridX + radGridW + pad));
+        
+        const jMin = Math.max(0, Math.floor(gridY - radGridH - pad));
+        const jMax = Math.min(segH, Math.ceil(gridY + radGridH + pad));
+
+        let dirty = false;
+        
+        // Iterate Grid
+        for (let j = jMin; j <= jMax; j++) {
+            for (let i = iMin; i <= iMax; i++) {
+                const index = i + j * (segW + 1);
+                
+                // Safety check index
+                if (index < 0 || index >= positions.count) continue;
+
+                // Get current Vertex Local Pos
+                const vx = positions.getX(index);
+                const vy = positions.getY(index);
+                const vz = positions.getZ(index);
+                
+                // Distance to Tool Center (XY only)
+                const dx = vx - localX;
+                const dy = vy - localY;
+                const distSq = dx*dx + dy*dy;
+                
+                if (distSq < toolR * toolR) {
+                    // Inside Tool
+                    // If Tool is lower than Vertex, Push Vertex Down
+                    if (localToolZ < vz) {
+                        positions.setZ(index, localToolZ);
+                        
+                        // Darken color based on depth
+                        // Depth relative to top (0). localToolZ is negative.
+                        // Map -10mm to 0.2 brightness, 0mm to 0.9 brightness
+                        const depth = Math.abs(localToolZ);
+                        const darkness = Math.max(0.2, 0.9 - (depth * 0.1));
+                        
+                        colors.setXYZ(index, darkness, darkness, darkness);
+                        
+                        dirty = true;
+                    }
+                }
+            }
+        }
+        
+        if (dirty) {
+            positions.needsUpdate = true;
+            colors.needsUpdate = true;
+        }
+    }
+
+    // --- End Solid Simulation Logic ---
 
     parseGCode(gcode, params) {
         // Clear old
@@ -327,6 +489,11 @@ export class GCodeViewer {
         if(this.animationPath.length > 0)
             this.toolMesh.position.copy(this.animationPath[0].pos);
         if (this.progressCallback) this.progressCallback(0);
+        
+        // Reset Solid Stock?
+        // Maybe not reset, user might want to see result.
+        // But if they start over, they probably want a fresh stock.
+        // For now, manual reset via Init button is safer.
     }
     skipEnd() {
         this.isPlaying = false;
@@ -363,6 +530,19 @@ export class GCodeViewer {
         const progressInc = distToCover / segmentDist;
         
         this.progress += progressInc;
+        
+        // --- Carving Logic ---
+        if (this.isSolidMode && endNode.type !== 'G0') {
+            // Only carve if not Rapid
+            // And only if actually playing/moving
+            // Interpolate position is handled in updateToolPos, 
+            // but we need to carve the path swept.
+            // For simplicity, just carve at the current tool position.
+            // High speed might skip spots, but sweeping is expensive.
+            // "Show how each pass would cut" -> Carving at tool tip is enough for now.
+            // We might want to carve at start AND end of this frame's movement to reduce gaps.
+        }
+        // ---------------------
 
         if (this.progress >= 1) {
             this.progress = 0;
@@ -387,5 +567,12 @@ export class GCodeViewer {
         const p1 = this.animationPath[this.currentIndex].pos;
         const p2 = this.animationPath[this.currentIndex + 1].pos;
         this.toolMesh.position.lerpVectors(p1, p2, this.progress);
+        
+        if (this.isSolidMode) {
+             const type = this.animationPath[this.currentIndex + 1].type;
+             if (type !== 'G0') {
+                 this.carve(this.toolMesh.position);
+             }
+        }
     }
 }
